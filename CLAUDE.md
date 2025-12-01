@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Eel** is a Python library for creating simple Electron-like offline HTML/JS GUI apps with full access to Python capabilities. It provides bi-directional communication between Python and JavaScript via WebSockets.
+**Reel** (Revived Eel) is a Python library for creating simple Electron-like offline HTML/JS GUI apps with full access to Python capabilities. It provides bi-directional communication between Python and JavaScript via WebSockets.
 
-**IMPORTANT**: This project is effectively unmaintained and has not received regular updates in years. No active development is planned. Exercise caution when using or extending this codebase.
+**IMPORTANT**: This is a revival of the original Eel project, which was unmaintained. Reel is actively maintained with focus on security hardening, modern Python patterns, and AI/LLM integration.
+
+> **Note:** The package name remains `eel` for backwards compatibility with the original Eel ecosystem.
 
 ## Core Architecture
 

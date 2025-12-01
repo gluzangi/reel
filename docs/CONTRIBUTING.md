@@ -1,10 +1,10 @@
-# Contributing to Eel
+# Contributing to Reel
 
-Thank you for your interest in contributing to Eel! This guide will help you get started.
+Thank you for your interest in contributing to Reel (Revived Eel)! This guide will help you get started.
 
 ## 🎯 Project Status
 
-Eel is undergoing **active revival and modernization**. We're a community-driven project focused on:
+Reel is the **active revival and modernization** of the original Eel project. We're a community-driven project focused on:
 - Security hardening
 - Modern Python patterns
 - AI/LLM integration
@@ -15,8 +15,8 @@ Eel is undergoing **active revival and modernization**. We're a community-driven
 ### 1. Fork and Clone
 
 ```bash
-git clone git@github.com:YOUR-USERNAME/Eel.git
-cd Eel
+git clone git@github.com:YOUR-USERNAME/reel-ai.git
+cd reel-ai
 ```
 
 ### 2. Set Up Development Environment
@@ -378,11 +378,11 @@ We follow the [Contributor Covenant](https://www.contributor-covenant.org/). In 
 
 - Check [docs/INDEX.md](INDEX.md) for all documentation
 - Ask in [Discord](https://discord.com/invite/3nqXPFX)
-- Open a [Discussion](https://github.com/python-eel/Eel/discussions)
+- Open a [Discussion](https://github.com/YOUR-ORG/reel-ai/discussions)
 
 ## 🙏 Thank You!
 
-Every contribution helps make Eel better. Whether it's code, documentation, bug reports, or spreading the word - **thank you for being part of this project!**
+Every contribution helps make Reel better. Whether it's code, documentation, bug reports, or spreading the word - **thank you for being part of this project!**
 
 ---
 

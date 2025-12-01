@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🎯 Eel - Revived & Modernized
+# 🎬 Reel
 
-### Build Local-AI Desktop Apps with Python + Web Tech
+### *Revived Eel* - Build Local-AI Desktop Apps with Python + Web Tech
 
 [![PyPI version](https://img.shields.io/pypi/v/Eel?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/project/Eel/)
 [![Downloads](https://img.shields.io/pypi/dm/Eel?style=for-the-badge&logo=pypi&logoColor=white)](https://pypistats.org/packages/eel)
@@ -20,11 +20,11 @@
 
 ---
 
-## 🚀 Project Revival Status
+## 🚀 About Reel
 
-> **⚠️ Important Update**
+> **Welcome to Reel - The Revival of Eel**
 >
-> Eel was previously unmaintained but is now under **active revival and modernization**. This fork includes:
+> The original Eel project was unmaintained, so we created **Reel** - a modernized, actively maintained fork. This revival includes:
 >
 > ✅ **Security hardening** - Authentication, origin validation, HTTPS/WSS support
 > ✅ **Modern Python patterns** - Type hints, async improvements, better architecture
@@ -36,9 +36,11 @@
 
 ---
 
-## 💡 What is Eel?
+## 💡 What is Reel?
 
-**Eel** is a lightweight Python library for creating **Electron-style desktop apps** using HTML/CSS/JS for the frontend and Python for the backend. Dead simple. No complex build chains. No IPC nightmares.
+**Reel** (Revived Eel) is a lightweight Python library for creating **Electron-style desktop apps** using HTML/CSS/JS for the frontend and Python for the backend. Dead simple. No complex build chains. No IPC nightmares.
+
+> **Note:** The package is still `pip install eel` for backwards compatibility with the original Eel ecosystem.
 
 ### The Magic
 
@@ -67,7 +69,7 @@ async function handleClick() {
 
 ---
 
-## 🎯 Why Eel?
+## 🎯 Why Choose Reel?
 
 ### Perfect For
 
@@ -79,8 +81,8 @@ async function handleClick() {
 
 ### Comparison
 
-| Feature | Eel | Electron | Tauri | PyQt |
-|---------|-----|----------|-------|------|
+| Feature | Reel | Electron | Tauri | PyQt |
+|---------|------|----------|-------|------|
 | Size | 🟢 Tiny (~50KB) | 🔴 Large (~150MB) | 🟡 Medium (~10MB) | 🟡 Medium |
 | Python Integration | 🟢 Native & Simple | 🟡 Via IPC | 🔴 Complex/None | 🟢 Native |
 | Modern Web UI | 🟢 Full Stack | 🟢 Full Stack | 🟢 Full Stack | 🔴 Limited |
@@ -161,7 +163,7 @@ python app.py
 
 ## 🤖 AI Integration
 
-Eel is **perfect for local AI applications**. Here's why:
+Reel is **perfect for local AI applications**. Here's why:
 
 - ✅ **Python-native** - Easy integration with LLM libraries
 - ✅ **Desktop environment** - Better for local models than web
@@ -205,7 +207,7 @@ eel.start('ai_chat.html')
 
 **⚠️ Important for Production Use**
 
-Eel is designed for **local/internal applications**. For production deployment, implement these security measures:
+Reel is designed for **local/internal applications**. For production deployment, implement these security measures:
 
 | Risk | Status | Mitigation |
 |------|--------|------------|
@@ -218,7 +220,7 @@ Eel is designed for **local/internal applications**. For production deployment, 
 - `examples/11-security/` - Authentication, HTTPS, origin validation
 - `docs/04-SECURITY_ANALYSIS.md` - Complete security audit and fixes
 
-**For internal tools on localhost:** Eel is safe and ready to use!
+**For internal tools on localhost:** Reel is safe and ready to use!
 **For network access:** Implement security measures from our guides.
 
 👉 Read [docs/04-SECURITY_ANALYSIS.md](docs/04-SECURITY_ANALYSIS.md) for details
@@ -286,7 +288,7 @@ Phase 3: AI Integration (Months 3-6)
 
 ## 🤝 Contributing
 
-**We need your help!** Eel revival is community-driven.
+**We need your help!** Reel is community-driven and thriving.
 
 ### Most Needed
 
@@ -419,9 +421,9 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
-- **Original Author:** [Chris Knott](https://github.com/ChrisKnott)
-- **Previous Maintainers:** [python-eel organization](https://github.com/python-eel)
-- **Revival Contributors:** Community-driven modernization effort
+- **Original Eel Author:** [Chris Knott](https://github.com/ChrisKnott) - Thank you for creating Eel!
+- **Original Maintainers:** [python-eel organization](https://github.com/python-eel)
+- **Reel (Revival) Contributors:** Community-driven modernization effort
 - **Built on:** [Bottle](https://bottlepy.org/), [Gevent](http://www.gevent.org/), WebSockets
 
 ---

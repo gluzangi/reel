@@ -1,10 +1,10 @@
-# 📚 Eel Documentation
+# 📚 Reel Documentation
 
-Welcome to the Eel documentation! This directory contains comprehensive analysis, guides, and strategies for working with Eel.
+Welcome to the Reel documentation! This directory contains comprehensive analysis, guides, and strategies for working with Reel (Revived Eel).
 
 ## 🎯 Start Here
 
-**New to Eel?** → Read the [main README](../README.md) first!
+**New to Reel?** → Read the [main README](../README.md) first!
 
 **Ready to dive deeper?** → Check [INDEX.md](INDEX.md) for complete navigation
 
@@ -222,6 +222,6 @@ start INDEX.md         # Windows
 
 **Remember:** Start with [INDEX.md](INDEX.md) for the best navigation experience!
 
-**Questions?** Join our [Discord](https://discord.com/invite/3nqXPFX) or open a [Discussion](https://github.com/python-eel/Eel/discussions)
+**Questions?** Join our [Discord](https://discord.com/invite/3nqXPFX) or open a [Discussion](https://github.com/YOUR-ORG/reel-ai/discussions)
 
-Made with ❤️ by the Eel community
+Made with ❤️ by the Reel community
