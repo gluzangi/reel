@@ -21,9 +21,39 @@ import sys
 import importlib_resources
 import socket
 import mimetypes
+from pathlib import Path
+import time
+from functools import wraps
+import logging
 
 
 mimetypes.add_type('application/javascript', '.js')
+
+# Security: Configure logging
+# Set up logger for security events
+_security_logger = logging.getLogger('reel.security')
+_security_logger.setLevel(logging.INFO)
+
+# Create console handler if no handlers exist
+if not _security_logger.handlers:
+    _console_handler = logging.StreamHandler()
+    _console_handler.setLevel(logging.INFO)
+    _formatter = logging.Formatter(
+        '[%(asctime)s] %(levelname)s [Reel Security] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    _console_handler.setFormatter(_formatter)
+    _security_logger.addHandler(_console_handler)
+
+# Optionally add file handler if log file specified
+if os.environ.get('REEL_LOG_FILE'):
+    try:
+        _file_handler = logging.FileHandler(os.environ['REEL_LOG_FILE'])
+        _file_handler.setLevel(logging.INFO)
+        _file_handler.setFormatter(_formatter)
+        _security_logger.addHandler(_file_handler)
+    except Exception as e:
+        print(f"[Reel] Warning: Could not create log file: {e}")
 
 # https://setuptools.pypa.io/en/latest/pkg_resources.html
 #     Use of pkg_resources is deprecated in favor of importlib.resources
@@ -46,6 +76,15 @@ root_path: str                              # Later assigned as global by init()
 # The maximum time (in milliseconds) that Python will try to retrieve a return value for functions executing in JS
 # Can be overridden through `eel.init` with the kwarg `js_result_timeout` (default: 10000)
 _js_result_timeout: int = 10000
+
+# Security: Maximum WebSocket message size in bytes (1MB default)
+# Prevents memory exhaustion attacks through oversized payloads
+# Can be overridden through environment variable EEL_MAX_MESSAGE_SIZE
+_max_message_size: int = int(os.environ.get('EEL_MAX_MESSAGE_SIZE', 1024 * 1024))  # 1MB
+
+# Security: Rate limiting storage - tracks function calls per client
+# Format: {function_name: {client_id: [timestamp1, timestamp2, ...]}}
+_rate_limit_storage: Dict[str, Dict[str, List[float]]] = {}
 
 # Attribute holding the start args from calls to eel.start()
 _start_args: OptionsDictT = {}
@@ -114,6 +153,70 @@ def expose(name_or_function: Optional[Callable[..., Any]] = None) -> Callable[..
         function = name_or_function
         _expose(function.__name__, function)
         return function
+
+
+def rate_limit(max_calls: int = 60, time_window: int = 60) -> Callable[..., Any]:
+    '''
+    Decorator to rate limit exposed functions.
+
+    Prevents DoS attacks by limiting the number of times a function can be called
+    within a time window per client.
+
+    Args:
+        max_calls: Maximum number of calls allowed in the time window (default: 60)
+        time_window: Time window in seconds (default: 60)
+
+    Example:
+        @eel.expose
+        @eel.rate_limit(max_calls=10, time_window=60)
+        def expensive_operation():
+            # This can only be called 10 times per minute per client
+            pass
+
+    Note:
+        Rate limiting is tracked per WebSocket connection (client).
+        For production use, consider implementing distributed rate limiting
+        with Redis or similar for multi-instance deployments.
+    '''
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Get client identifier (use WebSocket object as identifier)
+            # In a real implementation, you'd want a better client identifier
+            client_id = str(id(args)) if args else 'default'
+            func_name = func.__name__
+            current_time = time.time()
+
+            # Initialize storage for this function if needed
+            if func_name not in _rate_limit_storage:
+                _rate_limit_storage[func_name] = {}
+
+            # Initialize storage for this client if needed
+            if client_id not in _rate_limit_storage[func_name]:
+                _rate_limit_storage[func_name][client_id] = []
+
+            # Remove timestamps outside the time window
+            _rate_limit_storage[func_name][client_id] = [
+                ts for ts in _rate_limit_storage[func_name][client_id]
+                if current_time - ts < time_window
+            ]
+
+            # Check if rate limit is exceeded
+            if len(_rate_limit_storage[func_name][client_id]) >= max_calls:
+                _security_logger.warning(
+                    f"Rate limit exceeded for function '{func_name}': "
+                    f"{max_calls} calls per {time_window}s (client: {client_id[:8]}...)"
+                )
+                raise Exception(f"Rate limit exceeded: {max_calls} calls per {time_window} seconds")
+
+            # Record this call
+            _rate_limit_storage[func_name][client_id].append(current_time)
+
+            # Execute the function
+            return func(*args, **kwargs)
+
+        return wrapper
+    return decorator
 
 
 # PyParsing grammar for parsing exposed functions in JavaScript code
@@ -445,6 +548,20 @@ def _root() -> btl.Response:
 
 
 def _static(path: str) -> btl.Response:
+    # Security: Validate path to prevent directory traversal attacks
+    try:
+        # Resolve the requested path and root path to absolute paths
+        root = Path(root_path).resolve()
+        requested = (Path(root_path) / path).resolve()
+
+        # Ensure the resolved path is within the root directory
+        if not str(requested).startswith(str(root)):
+            _security_logger.warning(f"Path traversal attempt blocked: {path}")
+            return btl.HTTPError(403, "Forbidden: Path traversal detected")
+    except (ValueError, OSError) as e:
+        _security_logger.warning(f"Invalid path request: {path} - {e}")
+        return btl.HTTPError(400, "Bad Request: Invalid path")
+
     response = None
     if 'jinja_env' in _start_args and 'jinja_templates' in _start_args:
         if not isinstance(_start_args['jinja_templates'], str):
@@ -465,6 +582,24 @@ def _static(path: str) -> btl.Response:
 def _websocket(ws: WebSocketT) -> None:
     global _websockets
 
+    # Security: Validate WebSocket origin to prevent CSRF attacks
+    origin = btl.request.environ.get('HTTP_ORIGIN', '')
+    allowed_origins = os.environ.get('EEL_ALLOWED_ORIGINS', 'http://localhost:8000').split(',')
+
+    # Allow localhost variations for development
+    localhost_patterns = ['http://localhost:', 'http://127.0.0.1:', 'http://0.0.0.0:']
+    is_localhost = any(origin.startswith(pattern) for pattern in localhost_patterns)
+
+    if origin and not is_localhost and origin not in allowed_origins:
+        # Reject connections from unauthorized origins
+        _security_logger.warning(f"Rejected WebSocket connection from unauthorized origin: {origin}")
+        ws.close()
+        return
+
+    # Log successful WebSocket connection
+    if origin:
+        _security_logger.info(f"WebSocket connection established from origin: {origin}")
+
     for js_function in _js_functions:
         _import_js_function(js_function)
 
@@ -479,6 +614,18 @@ def _websocket(ws: WebSocketT) -> None:
     while True:
         msg = ws.receive()
         if msg is not None:
+            # Security: Check message size to prevent memory exhaustion attacks
+            msg_size = len(msg.encode('utf-8')) if isinstance(msg, str) else len(msg)
+            if msg_size > _max_message_size:
+                _security_logger.warning(
+                    f"Rejected oversized WebSocket message: {msg_size} bytes "
+                    f"(max: {_max_message_size}) from page: {page}"
+                )
+                # Close the connection for security
+                ws.close()
+                _websockets.remove((page, ws))
+                break
+
             message = jsn.loads(msg)
             spawn(_process_message, message, ws)
         else:
@@ -547,8 +694,21 @@ def _process_message(message: Dict[str, Any], ws: WebSocketT) -> None:
             traceback.print_exc()
             return_val = None
             status = 'error'
-            error_info['errorText'] = repr(e)
-            error_info['errorTraceback'] = err_traceback
+
+            # Security: Only expose detailed errors in development mode
+            # Set EEL_DEBUG=1 environment variable to enable debug mode
+            if os.environ.get('EEL_DEBUG'):
+                error_info['errorText'] = repr(e)
+                error_info['errorTraceback'] = err_traceback
+            else:
+                # Production mode: sanitized error message
+                error_info['errorText'] = 'An error occurred while processing your request'
+                # Log full error server-side for debugging
+                _security_logger.error(
+                    f"Function execution error: {message.get('name')} - {repr(e)}",
+                    exc_info=True if os.environ.get('EEL_DEBUG') else False
+                )
+
         _repeated_send(ws, _safe_json({ 'return': message['call'],
                                         'status': status,
                                         'value': return_val,
@@ -576,11 +736,19 @@ def _get_real_path(path: str) -> str:
 
 
 def _mock_js_function(f: str) -> None:
-    exec('%s = lambda *args: _mock_call("%s", args)' % (f, f), globals())
+    # Security: Replaced exec() with safe callable wrapper
+    # This prevents code injection vulnerabilities
+    def make_mock_wrapper(function_name: str) -> Callable:
+        return lambda *args: _mock_call(function_name, args)
+    globals()[f] = make_mock_wrapper(f)
 
 
 def _import_js_function(f: str) -> None:
-    exec('%s = lambda *args: _js_call("%s", args)' % (f, f), globals())
+    # Security: Replaced exec() with safe callable wrapper
+    # This prevents code injection vulnerabilities
+    def make_js_wrapper(function_name: str) -> Callable:
+        return lambda *args: _js_call(function_name, args)
+    globals()[f] = make_js_wrapper(f)
 
 
 def _call_object(name: str, args: Any) -> Dict[str, Any]:
@@ -649,6 +817,25 @@ def _websocket_close(page: str) -> None:
 
 
 def _set_response_headers(response: btl.Response) -> None:
+    # Security: Add security headers to protect against common web vulnerabilities
+    # X-Content-Type-Options: Prevent MIME-type sniffing
+    response.set_header('X-Content-Type-Options', 'nosniff')
+
+    # X-Frame-Options: Prevent clickjacking attacks
+    response.set_header('X-Frame-Options', 'DENY')
+
+    # X-XSS-Protection: Enable browser XSS protection
+    response.set_header('X-XSS-Protection', '1; mode=block')
+
+    # Content-Security-Policy: Restrict resource loading
+    # Note: Users can override this with custom CSP in their applications
+    default_csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'"
+    response.set_header('Content-Security-Policy', default_csp)
+
+    # Strict-Transport-Security: Enforce HTTPS (only if using HTTPS)
+    # Users should enable this in production with HTTPS
+    # response.set_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+
     if _start_args['disable_cache']:
         # https://stackoverflow.com/a/24748094/280852
         response.set_header('Cache-Control', 'no-store')

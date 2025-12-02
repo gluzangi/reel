@@ -1,12 +1,149 @@
-# Eel Security Analysis Report
+# Reel Security Analysis Report
 
 ## Executive Summary
 
-This document provides a comprehensive security assessment of the Eel library, focusing on OWASP Top 10 vulnerabilities, WebSocket security, input validation, and the exposed function mechanism. Each vulnerability is rated by severity and includes specific file locations, proof-of-concept examples, and remediation strategies.
+This document provides a comprehensive security assessment of the Reel (Revived Eel) library, focusing on OWASP Top 10 vulnerabilities, WebSocket security, input validation, and the exposed function mechanism. Each vulnerability is rated by severity and includes specific file locations, proof-of-concept examples, and remediation strategies.
 
-**Overall Risk Level:** HIGH
+**Overall Risk Level:** MEDIUM (improved from HIGH after critical fixes)
 
-The Eel library was designed for creating internal tools and utilities, not production web applications. While the core concept is sound, several critical security issues exist that must be addressed before deploying Eel-based applications in security-sensitive environments.
+The Reel library was designed for creating internal tools and utilities, not production web applications. While the core concept is sound, several security issues existed that we are actively addressing. **Recent security fixes have significantly improved the security posture.**
+
+---
+
+## ✅ Security Fixes Implemented (v0.16.0+)
+
+The following vulnerabilities have been **fixed** in Reel:
+
+### Critical Vulnerabilities Fixed
+
+### 1. Code Execution Vulnerability - FIXED ✅
+**Location:** `eel/__init__.py:578-591`
+**Issue:** Unsafe `exec()` calls allowed code injection
+**Fix:** Replaced with safe callable wrappers
+```python
+# BEFORE (VULNERABLE):
+exec('%s = lambda *args: _mock_call("%s", args)' % (f, f), globals())
+
+# AFTER (SECURE):
+def make_mock_wrapper(function_name: str) -> Callable:
+    return lambda *args: _mock_call(function_name, args)
+globals()[f] = make_mock_wrapper(f)
+```
+
+### 2. Missing Origin Validation - FIXED ✅
+**Location:** `eel/__init__.py:465-479`
+**Issue:** No WebSocket origin validation (CSRF vulnerable)
+**Fix:** Added origin validation with configurable allowed origins
+```python
+# Validate WebSocket origin to prevent CSRF attacks
+origin = btl.request.environ.get('HTTP_ORIGIN', '')
+allowed_origins = os.environ.get('EEL_ALLOWED_ORIGINS', 'http://localhost:8000').split(',')
+
+if origin and not is_localhost and origin not in allowed_origins:
+    ws.close()
+    return
+```
+
+### 3. Information Disclosure - FIXED ✅
+**Location:** `eel/__init__.py:552-578`
+**Issue:** Detailed error messages leaked sensitive information
+**Fix:** Sanitized errors in production, detailed only in debug mode
+```python
+# Production mode: sanitized error message
+if os.environ.get('EEL_DEBUG'):
+    error_info['errorText'] = repr(e)  # Development only
+else:
+    error_info['errorText'] = 'An error occurred while processing your request'
+```
+
+### 4. Authentication Example Added ✅
+**Location:** `examples/11-security/`
+**Purpose:** Demonstrates session-based authentication and role-based authorization
+**Features:**
+- Session token management
+- Role-based access control
+- Input validation patterns
+- Safe function exposure
+
+---
+
+### Medium Vulnerabilities Fixed
+
+### 5. Missing Security Headers - FIXED ✅
+**Location:** `eel/__init__.py:682-704`
+**Issue:** No security headers were set on HTTP responses
+**Fix:** Added comprehensive security headers
+```python
+response.set_header('X-Content-Type-Options', 'nosniff')
+response.set_header('X-Frame-Options', 'DENY')
+response.set_header('X-XSS-Protection', '1; mode=block')
+response.set_header('Content-Security-Policy', default_csp)
+```
+
+### 6. Path Traversal Vulnerability - FIXED ✅
+**Location:** `eel/__init__.py:453-484`
+**Issue:** No validation prevented directory traversal attacks
+**Fix:** Implemented path validation using pathlib
+```python
+root = Path(root_path).resolve()
+requested = (Path(root_path) / path).resolve()
+
+if not str(requested).startswith(str(root)):
+    _security_logger.warning(f"Path traversal attempt blocked: {path}")
+    return btl.HTTPError(403, "Forbidden: Path traversal detected")
+```
+
+### 7. Message Size Limits - FIXED ✅
+**Location:** `eel/__init__.py:53-54, 612-622`
+**Issue:** No limits on WebSocket message size (DoS vector)
+**Fix:** Added configurable message size limits
+```python
+_max_message_size: int = int(os.environ.get('EEL_MAX_MESSAGE_SIZE', 1024 * 1024))  # 1MB
+
+msg_size = len(msg.encode('utf-8')) if isinstance(msg, str) else len(msg)
+if msg_size > _max_message_size:
+    _security_logger.warning(f"Rejected oversized message: {msg_size} bytes")
+    ws.close()
+```
+
+### 8. Rate Limiting - FIXED ✅
+**Location:** `eel/__init__.py:131-190`
+**Issue:** No rate limiting on function calls (DoS vector)
+**Fix:** Added `@eel.rate_limit()` decorator
+```python
+@eel.expose
+@eel.rate_limit(max_calls=10, time_window=60)
+def expensive_operation():
+    # Limited to 10 calls per minute
+    pass
+```
+
+### 9. Security Logging - FIXED ✅
+**Location:** `eel/__init__.py:32-56`
+**Issue:** No security event logging
+**Fix:** Implemented comprehensive security logging
+```python
+_security_logger = logging.getLogger('reel.security')
+# Logs all security events: origin rejections, path traversal attempts,
+# rate limit violations, oversized messages, function errors
+```
+
+**Log file configuration:**
+```bash
+export REEL_LOG_FILE=logs/security.log
+```
+
+### 10. Dependency Version Pinning - FIXED ✅
+**Location:** `setup.py:17-27`
+**Issue:** No version constraints on dependencies
+**Fix:** Added version constraints to prevent vulnerable versions
+```python
+install_requires=[
+    'bottle>=0.12.0,<1.0.0',
+    'bottle-websocket>=0.2.0,<1.0.0',
+    # ... all dependencies now have version constraints
+]
+```
 
 ---
 

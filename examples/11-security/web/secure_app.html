@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎬 Reel Security Demo</title>
+    <script type="text/javascript" src="/eel.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 900px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 0.95em;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 1.3em;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        /* Login Form */
+        .login-box {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .test-credentials {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+
+        .test-credentials h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .credential-item {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin: 5px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        /* Dashboard */
+        .dashboard {
+            display: none;
+        }
+
+        .user-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .user-details h3 {
+            margin-bottom: 5px;
+        }
+
+        .user-roles {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .role-badge {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card h4 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .data-list {
+            list-style: none;
+        }
+
+        .data-list li {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .action-buttons .btn {
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .admin-section {
+            border: 2px solid #ffc107;
+            background: #fffbf0;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 Reel Security Demo</h1>
+            <p>Authentication & Authorization Example</p>
+        </div>
+
+        <div class="content">
+            <!-- Alerts -->
+            <div id="alert-container"></div>
+
+            <!-- Login Section -->
+            <div id="login-section">
+                <div class="section">
+                    <div class="login-box">
+                        <h2 class="section-title">Login</h2>
+                        <form id="login-form" onsubmit="handleLogin(event)">
+                            <div class="form-group">
+                                <label for="username">Username</label>
+                                <input type="text" id="username" name="username" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="password">Password</label>
+                                <input type="password" id="password" name="password" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Login</button>
+                        </form>
+
+                        <div class="test-credentials">
+                            <h4>📝 Test Credentials</h4>
+                            <div class="credential-item">
+                                <strong>Admin:</strong> admin / admin123
+                            </div>
+                            <div class="credential-item">
+                                <strong>User:</strong> user / user123
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Public Section -->
+                <div class="section">
+                    <h3 class="section-title">🌐 Public Information</h3>
+                    <div class="card">
+                        <button class="btn btn-secondary" onclick="loadPublicInfo()">
+                            Load Public Data (No Auth Required)
+                        </button>
+                        <div id="public-data" style="margin-top: 15px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Section (shown after login) -->
+            <div id="dashboard-section" class="dashboard">
+                <!-- User Info Card -->
+                <div class="user-info">
+                    <div class="user-details">
+                        <h3 id="user-name">Loading...</h3>
+                        <p id="user-username"></p>
+                        <div class="user-roles" id="user-roles"></div>
+                    </div>
+                    <button class="btn btn-danger" onclick="handleLogout()">Logout</button>
+                </div>
+
+                <!-- User-Level Section -->
+                <div class="section">
+                    <h3 class="section-title">👤 User Dashboard</h3>
+                    <div class="card">
+                        <h4>Your Data</h4>
+                        <div class="action-buttons">
+                            <button class="btn btn-primary" onclick="loadUserData()">
+                                Load User Data
+                            </button>
+                            <button class="btn btn-secondary" onclick="testUpdateProfile()">
+                                Update Profile
+                            </button>
+                        </div>
+                        <div id="user-data" style="margin-top: 15px;"></div>
+                    </div>
+                </div>
+
+                <!-- Admin-Level Section -->
+                <div class="section" id="admin-section" style="display: none;">
+                    <h3 class="section-title">⚡ Admin Dashboard</h3>
+                    <div class="card admin-section">
+                        <h4>🔐 Admin Controls</h4>
+                        <p style="color: #856404; margin-bottom: 15px;">
+                            <strong>Note:</strong> This section is only visible to admin users
+                        </p>
+
+                        <div class="action-buttons">
+                            <button class="btn btn-primary" onclick="loadAdminData()">
+                                Load Admin Data
+                            </button>
+                            <button class="btn btn-secondary" onclick="loadSystemStats()">
+                                System Statistics
+                            </button>
+                            <button class="btn btn-secondary" onclick="executeAdminAction('backup')">
+                                Backup Database
+                            </button>
+                        </div>
+                        <div id="admin-data" style="margin-top: 15px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let sessionId = null;
+        let currentUser = null;
+
+        // Show alert message
+        function showAlert(message, type = 'info') {
+            const alertContainer = document.getElementById('alert-container');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alertContainer.innerHTML = '';
+            alertContainer.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        // Handle login
+        async function handleLogin(event) {
+            event.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const result = await eel.login(username, password)();
+
+                if (result.error) {
+                    showAlert(result.error, 'error');
+                    return;
+                }
+
+                sessionId = result.session_id;
+                currentUser = result.user;
+
+                showAlert('Login successful!', 'success');
+                showDashboard();
+            } catch (error) {
+                showAlert('Login failed: ' + error, 'error');
+            }
+        }
+
+        // Handle logout
+        async function handleLogout() {
+            if (sessionId) {
+                await eel.logout(sessionId)();
+            }
+
+            sessionId = null;
+            currentUser = null;
+
+            showAlert('Logged out successfully', 'info');
+            showLogin();
+        }
+
+        // Show login section
+        function showLogin() {
+            document.getElementById('login-section').style.display = 'block';
+            document.getElementById('dashboard-section').style.display = 'none';
+        }
+
+        // Show dashboard
+        function showDashboard() {
+            document.getElementById('login-section').style.display = 'none';
+            document.getElementById('dashboard-section').style.display = 'block';
+
+            // Update user info
+            document.getElementById('user-name').textContent = currentUser.name;
+            document.getElementById('user-username').textContent = `@${currentUser.username}`;
+
+            // Display roles
+            const rolesContainer = document.getElementById('user-roles');
+            rolesContainer.innerHTML = '';
+            currentUser.roles.forEach(role => {
+                const badge = document.createElement('span');
+                badge.className = 'role-badge';
+                badge.textContent = role.toUpperCase();
+                rolesContainer.appendChild(badge);
+            });
+
+            // Show admin section if user is admin
+            if (currentUser.roles.includes('admin')) {
+                document.getElementById('admin-section').style.display = 'block';
+            }
+        }
+
+        // Load public information (no auth required)
+        async function loadPublicInfo() {
+            try {
+                const info = await eel.get_public_info()();
+                const container = document.getElementById('public-data');
+                container.innerHTML = `
+                    <div class="alert alert-info">
+                        <strong>${info.app_name}</strong> v${info.version}<br>
+                        ${info.message}
+                    </div>
+                `;
+            } catch (error) {
+                showAlert('Error loading public info: ' + error, 'error');
+            }
+        }
+
+        // Load user data (requires authentication)
+        async function loadUserData() {
+            try {
+                const result = await eel.get_user_data(sessionId)();
+
+                if (result.error) {
+                    showAlert(result.error, 'error');
+                    return;
+                }
+
+                const container = document.getElementById('user-data');
+                let html = `<p style="margin: 15px 0;"><strong>${result.message}</strong></p>`;
+                html += '<ul class="data-list">';
+                result.data.forEach(item => {
+                    html += `<li>${item.title}</li>`;
+                });
+                html += '</ul>';
+                container.innerHTML = html;
+            } catch (error) {
+                showAlert('Error loading user data: ' + error, 'error');
+            }
+        }
+
+        // Test profile update
+        async function testUpdateProfile() {
+            try {
+                const result = await eel.update_profile(sessionId, 'Updated Name')();
+
+                if (result.error) {
+                    showAlert(result.error, 'error');
+                    return;
+                }
+
+                showAlert(result.message, 'success');
+            } catch (error) {
+                showAlert('Error updating profile: ' + error, 'error');
+            }
+        }
+
+        // Load admin data (requires admin role)
+        async function loadAdminData() {
+            try {
+                const result = await eel.get_admin_data(sessionId)();
+
+                if (result.error) {
+                    showAlert(result.error, 'error');
+                    return;
+                }
+
+                const container = document.getElementById('admin-data');
+                let html = `<p style="margin: 15px 0;"><strong>${result.message}</strong></p>`;
+                html += '<ul class="data-list">';
+                result.data.forEach(item => {
+                    html += `<li>🔒 ${item.title}</li>`;
+                });
+                html += '</ul>';
+                container.innerHTML = html;
+            } catch (error) {
+                showAlert('Error loading admin data: ' + error, 'error');
+            }
+        }
+
+        // Load system statistics
+        async function loadSystemStats() {
+            try {
+                const result = await eel.get_system_stats(sessionId)();
+
+                if (result.error) {
+                    showAlert(result.error, 'error');
+                    return;
+                }
+
+                const container = document.getElementById('admin-data');
+                container.innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">${result.active_sessions}</div>
+                            <div class="stat-label">Active Sessions</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${result.total_users}</div>
+                            <div class="stat-label">Total Users</div>
+                        </div>
+                    </div>
+                    <p style="margin-top: 15px; text-align: center; color: #666;">
+                        Accessed by: <strong>${result.admin}</strong>
+                    </p>
+                `;
+            } catch (error) {
+                showAlert('Error loading stats: ' + error, 'error');
+            }
+        }
+
+        // Execute admin action
+        async function executeAdminAction(action) {
+            try {
+                const result = await eel.execute_admin_action(sessionId, action)();
+
+                if (result.error) {
+                    showAlert(result.error, 'error');
+                    return;
+                }
+
+                showAlert(`${result.message} (by ${result.executor})`, 'success');
+            } catch (error) {
+                showAlert('Error executing action: ' + error, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

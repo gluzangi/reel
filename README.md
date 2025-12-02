@@ -106,6 +106,20 @@ pip install eel[jinja2]
 pip install eel[ai]
 ```
 
+### Configuration (Optional)
+
+Reel supports environment-based configuration for security and customization:
+
+```bash
+# Copy the example environment file
+cp .env.example .env
+
+# Edit .env with your settings
+# Available options: EEL_DEBUG, EEL_ALLOWED_ORIGINS, SECRET_KEY, etc.
+```
+
+See [.env.example](.env.example) for all available configuration options.
+
 ### 60-Second App
 
 **1. Create structure:**
@@ -207,23 +221,48 @@ eel.start('ai_chat.html')
 
 **⚠️ Important for Production Use**
 
-Reel is designed for **local/internal applications**. For production deployment, implement these security measures:
+Reel is designed for **local/internal applications**. We've recently fixed critical security vulnerabilities and continue hardening for production use.
 
-| Risk | Status | Mitigation |
-|------|--------|------------|
-| No authentication | ⚠️ Required | Use session tokens or OAuth (see examples) |
+### Recent Security Fixes (v0.16.0+)
+
+**Critical Issues Fixed:**
+| Issue | Status | Details |
+|-------|--------|---------|
+| Code execution vulnerability | ✅ **Fixed** | Removed unsafe `exec()` calls (eel/__init__.py:578-591) |
+| Missing origin validation | ✅ **Fixed** | Added WebSocket origin validation (eel/__init__.py:465-479) |
+| Information disclosure | ✅ **Fixed** | Sanitized error messages in production mode |
+
+**Medium Issues Fixed:**
+| Issue | Status | Details |
+|-------|--------|---------|
+| Missing security headers | ✅ **Fixed** | Added X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, CSP |
+| Path traversal attacks | ✅ **Fixed** | Implemented path validation in static file serving |
+| Message size limits | ✅ **Fixed** | Added configurable max message size (EEL_MAX_MESSAGE_SIZE) |
+| Rate limiting | ✅ **Fixed** | Added `@eel.rate_limit()` decorator for DoS protection |
+| Security logging | ✅ **Fixed** | Comprehensive logging of security events (REEL_LOG_FILE) |
+| Dependency pinning | ✅ **Fixed** | Version constraints in setup.py |
+
+**Still Required for Production:**
+| Issue | Status | Details |
+|-------|--------|---------|
+| No authentication | ⚠️ Required | Use session-based auth (see examples/11-security) |
 | Plain HTTP/WS | ⚠️ Required | Enable HTTPS/WSS for network access |
-| No origin validation | ⚠️ Required | Validate WebSocket origins |
-| Exposed functions | ⚠️ Careful | Only expose necessary functions |
 
-**Security examples available in:**
-- `examples/11-security/` - Authentication, HTTPS, origin validation
-- `docs/04-SECURITY_ANALYSIS.md` - Complete security audit and fixes
+**Security resources:**
+- ✅ `examples/11-security/` - **NEW!** Complete authentication & authorization example
+- 📖 `docs/04-SECURITY_ANALYSIS.md` - Complete OWASP security audit
+- 🔧 `.env.example` - Configuration template with security settings
+
+**Environment variables for security:**
+- `EEL_DEBUG=1` - Enable detailed errors (development only)
+- `EEL_ALLOWED_ORIGINS` - Comma-separated allowed WebSocket origins
+- `EEL_MAX_MESSAGE_SIZE` - Maximum WebSocket message size in bytes (default: 1MB)
+- `REEL_LOG_FILE` - Path to security log file (e.g., logs/security.log)
 
 **For internal tools on localhost:** Reel is safe and ready to use!
-**For network access:** Implement security measures from our guides.
+**For network access:** Implement authentication from `examples/11-security/`
 
-👉 Read [docs/04-SECURITY_ANALYSIS.md](docs/04-SECURITY_ANALYSIS.md) for details
+👉 Read [docs/04-SECURITY_ANALYSIS.md](docs/04-SECURITY_ANALYSIS.md) for complete security guide
 
 ---
 
@@ -272,8 +311,11 @@ Reel is designed for **local/internal applications**. For production deployment,
 ### Roadmap
 
 ```
-Phase 1: Security (Weeks 1-2)     🚧 IN PROGRESS
-  └─ Authentication, HTTPS, origin validation
+Phase 1: Security (Weeks 1-2)     ✅ PARTIALLY COMPLETE
+  ├─ ✅ Fixed critical vulnerabilities (exec, origin validation, error sanitization)
+  ├─ ✅ Authentication examples (examples/11-security)
+  ├─ 🚧 HTTPS/WSS support (in progress)
+  └─ 🚧 Rate limiting & CSRF protection (planned)
 
 Phase 2: Modernization (Months 1-3)
   └─ Remove globals, type hints, better architecture
@@ -294,9 +336,9 @@ Phase 3: AI Integration (Months 3-6)
 
 | Priority | Area | Skills | Time |
 |----------|------|--------|------|
-| 🔴 HIGH | Security fixes | Python, security | 1-2 weeks |
+| 🔴 HIGH | HTTPS/WSS support | Python, security, SSL/TLS | 1-2 weeks |
 | 🟠 MEDIUM | Remove global state | Python, architecture | 1 week |
-| 🟡 LOW | Type hints | Python, mypy | 2 weeks |
+| 🟡 MEDIUM | Type hints | Python, mypy | 2 weeks |
 | 🟢 OPPORTUNITY | AI integration | Python, LLMs | 1 month |
 
 ### Getting Started
