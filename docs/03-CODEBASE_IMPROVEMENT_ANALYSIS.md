@@ -10,27 +10,7 @@ This document provides a comprehensive technical analysis of the Reel codebase, 
 
 ## 1. Pending Architecture & Design Issues
 
-### 1.1 Weak WebSocket Message Processing (Partial Fix)
-
-**Severity:** MEDIUM
-**Files:** `eel/__init__.py`
-
-**Issue:**
-The `_process_message` function has been improved to check for function existence and handle exceptions with logging. However, it still lacks strict schema validation for incoming messages.
-
-**Current State:**
-```python
-def _process_message(self, message: Dict[str, Any], ws: WebSocketT) -> None:
-    if 'call' in message:
-        # Relies on try/except for missing 'args' or malformed data
-        if message['name'] in self._exposed_functions:
-             return_val = self._exposed_functions[message['name']](*message['args'])
-```
-
-**Recommendation:**
-Implement the `validate_message` function as originally proposed to ensure `call`, `name`, and `args` exist and are of the correct types *before* attempting execution.
-
-### 1.2 Missing Async/Await Support
+### 1.1 Missing Async/Await Support
 
 **Severity:** MEDIUM
 **Files:** `eel/__init__.py`
@@ -77,20 +57,16 @@ Define the default handler as a module-level constant or use a faster JSON libra
 
 ## 3. Pending Testing & Quality Assurance
 
-### 3.1 Limited Test Coverage
+### 3.1 Limited Test Coverage (Improved)
 
 **Severity:** MEDIUM
-**Files:** `tests/`
+**Files:** `tests/`, `eel/__init__.py`
 
 **Issue:**
-The test suite remains minimal.
+The test suite was minimal, lacking coverage for new architectural components and message validation.
 
-**Recommendation:**
-Add unit tests for:
-- `EelApplication` state management.
-- `_process_message` validation logic.
-- `rate_limit` decorator.
-- Browser detection logic.
+**Resolution/Recommendation:**
+Added new unit tests in `tests/unit/test_eel_app.py` and `tests/unit/test_message_validation.py` to cover `EelApplication` state management and `_validate_message` logic. Further tests are still needed for `rate_limit` decorator, browser detection logic, and fuzzing.
 
 ### 3.2 Missing Input Fuzzing
 
@@ -103,15 +79,15 @@ Add hypothesis-based fuzzing tests for WebSocket message processing to ensure ro
 
 ## 4. Pending Documentation & Developer Experience
 
-### 4.1 Missing Type Stubs
+### 4.1 Missing Docstring Examples
 
 **Severity:** LOW
 
 **Issue:**
-`py.typed` exists, but comprehensive `.pyi` stubs are missing.
+Many functions lack comprehensive docstrings with examples.
 
 **Recommendation:**
-Generate and include `eel/__init__.pyi` to provide better IDE support for the new `EelApplication` structure.
+Add comprehensive docstrings to all public functions and methods, especially those in the `EelApplication` class, following a consistent style.
 
 ---
 
@@ -143,13 +119,33 @@ The following issues have been addressed in the recent refactoring:
 - **Issue:** Loose version constraints.
 - **Resolution:** `setup.py` updated with strict version pinning and new `extras_require` for AI and security features.
 
+### 5.7 Weak WebSocket Message Processing (Fixed)
+- **Issue:** Lack of strict schema validation for incoming WebSocket messages.
+- **Resolution:** Implemented `_validate_message` function to ensure `call`, `name`, and `args` fields exist and have correct types before processing messages, hardening against malformed payloads.
+
+### 5.8 Missing Type Stubs (Fixed)
+- **Issue:** `py.typed` exists, but comprehensive `.pyi` stubs were missing.
+- **Resolution:** Generated and included `eel/__init__.pyi` to provide better IDE support for the new `EelApplication` structure.
+
+
 ---
+
+
 
 ## 6. Conclusion & Next Steps
 
+
+
 The codebase has undergone significant modernization. The critical security risk of dynamic code execution has been eliminated, and the architecture is now more robust with the `EelApplication` class.
 
+
+
 **Immediate Next Steps:**
-1.  **Refine Message Validation:** harden `_process_message` against malformed payloads.
-2.  **Add Tests:** Urgent need to backfill tests for the new architecture.
-3.  **Documentation:** Update docstrings and generate type stubs.
+
+
+
+1.  **Add More Tests:** Continue backfilling tests, especially for the `rate_limit` decorator, browser detection, and fuzzing.
+
+
+
+2.  **Documentation:** Update docstrings for all public functions and methods.
