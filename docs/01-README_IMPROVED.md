@@ -8,7 +8,7 @@
 [![Downloads](https://img.shields.io/pypi/dm/Eel?style=for-the-badge&logo=pypi&logoColor=white)](https://pypistats.org/packages/eel)
 [![Python](https://img.shields.io/pypi/pyversions/Eel?style=for-the-badge&logo=python&logoColor=white)](https://pypi.org/project/Eel/)
 [![License](https://img.shields.io/pypi/l/Eel.svg?style=for-the-badge)](https://pypi.org/project/Eel/)
-[![Discord](https://img.shields.io/discord/YOUR_DISCORD_ID?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/3nqXPFX)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/3nqXPFX)
 
 </div>
 
