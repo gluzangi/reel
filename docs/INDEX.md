@@ -99,7 +99,7 @@ Choose your path based on your role and objectives:
 
 ### Phase 1: Security Hardening (Week 1-2) 🔴 CRITICAL
 
-**Goal:** Make Eel production-ready with basic security
+**Goal:** Make Reel production-ready with basic security
 
 **Tasks:**
 1. ✅ Add session-based authentication example
@@ -126,10 +126,12 @@ Choose your path based on your role and objectives:
 **Tasks:**
 1. ✅ Introduce `EelApplication` class (remove globals)
 2. ✅ Implement proper structured logging
-3. ✅ Add comprehensive type hints
+3. 🚧 Add comprehensive type hints (Core files done)
 4. ✅ Create unit tests for all core functions
 5. ✅ Add plugin/middleware architecture
 6. ✅ Improve error handling with custom exceptions
+7. ✅ Enhance browser detection robustness
+8. ✅ Pin dependency versions
 
 **Deliverables:**
 - `eel.v2` module with new architecture
@@ -146,11 +148,12 @@ Choose your path based on your role and objectives:
 **Goal:** Position Eel as the leading local-AI GUI framework
 
 **Tasks:**
-1. ✅ Build `eel.ai` extension module
-2. ✅ Implement natural language interface
-3. ✅ Create AI-powered UI generator
-4. ✅ Add semantic function search
-5. ✅ Build 5 compelling demo applications
+1. ✅ Add AI dependencies (`genkit`, `google-genai`, `ollama`, etc.)
+2. 🚧 Build `eel.ai` extension module
+3. 🚧 Implement natural language interface
+4. 🚧 Create AI-powered UI generator
+5. 🚧 Add semantic function search
+6. 🚧 Build 5 compelling demo applications
 
 **Deliverables:**
 - `eel[ai]` extra with AI dependencies
