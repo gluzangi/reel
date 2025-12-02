@@ -103,7 +103,21 @@ class EelApplication:
         }
 
     def expose(self, name_or_function: Optional[Union[str, Callable[..., Any]]] = None) -> Callable[..., Any]:
-        """Decorator to expose Python callables via Eel's JavaScript API."""
+        """
+        Decorator to expose Python callables via Eel's JavaScript API.
+
+        Args:
+            name_or_function: Either a string name for the function, or the function itself.
+
+        Example:
+            @eel.expose
+            def my_func():
+                pass
+
+            @eel.expose("my_alias")
+            def my_func():
+                pass
+        """
         if name_or_function is None:
             return self.expose
 
@@ -124,7 +138,13 @@ class EelApplication:
         self._exposed_functions[name] = function
 
     def rate_limit(self, max_calls: int = 60, time_window: int = 60) -> Callable[..., Any]:
-        """Decorator to rate limit exposed functions."""
+        """
+        Decorator to rate limit exposed functions.
+
+        Args:
+            max_calls: Maximum number of calls allowed in the time window.
+            time_window: Time window in seconds.
+        """
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -157,7 +177,14 @@ class EelApplication:
 
     def init(self, path: str, allowed_extensions: List[str] = ['.js', '.html', '.txt', '.htm', '.xhtml', '.vue'],
              js_result_timeout: int = 10000) -> None:
-        """Initialize Eel."""
+        """
+        Initialize Eel with the path to the web files.
+
+        Args:
+            path: Directory containing the web files.
+            allowed_extensions: List of file extensions to parse for eel.expose() calls.
+            js_result_timeout: Timeout in milliseconds for JS function calls.
+        """
         self._root_path = self._get_real_path(path)
         self._js_result_timeout = js_result_timeout
 
@@ -193,7 +220,29 @@ class EelApplication:
               all_interfaces: bool = False, disable_cache: bool = True,
               default_path: str = 'index.html', app: btl.Bottle = None,
               shutdown_delay: float = 1.0, suppress_error: bool = False) -> None:
-        """Start the Eel app."""
+        """
+        Start the Eel application server and browser.
+
+        Args:
+            *start_urls: URLs to open in the browser.
+            mode: Browser mode ('chrome', 'electron', 'edge', 'custom', or None).
+            host: Hostname to bind the server to (default: 'localhost').
+            port: Port to bind (default: 8000). Use 0 for auto-selection.
+            block: Whether to block the calling thread (default: True).
+            jinja_templates: Path to Jinja2 templates directory.
+            cmdline_args: Additional command line arguments for the browser.
+            size: Initial window size (width, height).
+            position: Initial window position (x, y).
+            geometry: Dictionary of size/position for specific pages.
+            close_callback: Callback function when a websocket connection closes.
+            app_mode: Whether to run in app mode (no browser UI).
+            all_interfaces: Listen on all network interfaces.
+            disable_cache: Disable HTTP caching.
+            default_path: Default file to serve for root URL.
+            app: Custom Bottle app instance.
+            shutdown_delay: Delay before shutting down after last client disconnects.
+            suppress_error: Suppress deprecation warnings.
+        """
         
         if app is None:
             app = btl.default_app()
@@ -247,22 +296,45 @@ class EelApplication:
             self.spawn(run_lambda)
 
     def show(self, *start_urls: str) -> None:
-        """Show the specified URL(s) in the browser."""
+        """
+        Show the specified URL(s) in the browser.
+        
+        Args:
+            *start_urls: URLs to open.
+        """
         brw.open(list(start_urls), self._start_args)
 
     def sleep(self, seconds: Union[int, float]) -> None:
-        """Non-blocking sleep."""
+        """
+        Non-blocking sleep compatible with Gevent.
+        
+        Args:
+            seconds: Seconds to sleep.
+        """
         gvt.sleep(seconds)
 
     def spawn(self, function: Callable[..., Any], *args: Any, **kwargs: Any) -> gvt.Greenlet:
-        """Spawn a new Greenlet."""
+        """
+        Spawn a new Greenlet task.
+        
+        Args:
+            function: Function to run.
+            *args: Arguments for the function.
+            **kwargs: Keyword arguments.
+        """
         return gvt.spawn(function, *args, **kwargs)
 
     def register_eel_routes(self, app: btl.Bottle) -> None:
-        """Register Eel routes with a Bottle app."""
+        """
+        Register Eel's default routes with a Bottle application.
+        
+        Args:
+            app: Bottle app instance.
+        """
         for route_path, route_params in self._bottle_routes.items():
             route_func, route_kwargs = route_params
             app.route(path=route_path, callback=route_func, **route_kwargs)
+
 
     # Internal methods
 
@@ -364,7 +436,31 @@ class EelApplication:
             except Exception:
                 self.sleep(0.001)
 
+    def _validate_message(self, message: Dict[str, Any]) -> bool:
+        """Validate incoming WebSocket message structure."""
+        if 'call' in message:
+            required = {'call', 'name', 'args'}
+            if not required.issubset(message.keys()):
+                return False
+            if not isinstance(message['name'], str):
+                return False
+            if not isinstance(message['args'], list):
+                return False
+            if not isinstance(message['call'], (int, float)):
+                return False
+        elif 'return' in message:
+            required = {'return', 'status', 'value'}
+            if not required.issubset(message.keys()):
+                return False
+        else:
+            return False
+        return True
+
     def _process_message(self, message: Dict[str, Any], ws: WebSocketT) -> None:
+        if not self._validate_message(message):
+            logger.warning(f"Invalid message structure: {message}")
+            return
+
         if 'call' in message:
             error_info = {}
             try:
