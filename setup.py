@@ -32,6 +32,11 @@ setup(
         "ai": [
             "llama-cpp-python>=0.2.0",
             "sentence-transformers>=2.2.0",
+            "genkit>=0.4.0",
+            "google-genai>=0.1.0",
+            "pandas>=2.0.0",
+            "polars[pyarrow]>=0.19.0",
+            "sqlite-vector[ai]>=0.1.0",
         ]
     },
     python_requires='>=3.7',
