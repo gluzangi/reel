@@ -1,226 +1,65 @@
 from __future__ import annotations
-from builtins import range
 import traceback
-from io import open
-from typing import Union, Any, Dict, List, Set, Tuple, Optional, Callable
-from typing_extensions import Literal
-from eel.types import OptionsDictT, WebSocketT
-import gevent as gvt
+import logging
+import os
+import sys
+import socket
+import mimetypes
+import re as rgx
 import json as jsn
+import random as rnd
+import time
+from functools import wraps
+from typing import Any, Dict, List, Set, Tuple, Optional, Callable, Union
+from typing_extensions import Literal
+
+import gevent as gvt
 import bottle as btl
 try:
     import bottle_websocket as wbs
 except ImportError:
     import bottle.ext.websocket as wbs
-import re as rgx
-import os
-import eel.browsers as brw
 import pyparsing as pp
-import random as rnd
-import sys
 import importlib_resources
-import socket
-import mimetypes
 from pathlib import Path
-import time
-from functools import wraps
-import logging
 
+from eel.types import OptionsDictT, WebSocketT
+import eel.browsers as brw
 
-mimetypes.add_type('application/javascript', '.js')
+# Configure module-level logger
+logger = logging.getLogger('eel')
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
-# Security: Configure logging
-# Set up logger for security events
+# Security logger
 _security_logger = logging.getLogger('reel.security')
-_security_logger.setLevel(logging.INFO)
-
-# Create console handler if no handlers exist
 if not _security_logger.handlers:
-    _console_handler = logging.StreamHandler()
-    _console_handler.setLevel(logging.INFO)
-    _formatter = logging.Formatter(
-        '[%(asctime)s] %(levelname)s [Reel Security] %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    _console_handler.setFormatter(_formatter)
-    _security_logger.addHandler(_console_handler)
+    _sec_handler = logging.StreamHandler()
+    _sec_formatter = logging.Formatter('[%(asctime)s] %(levelname)s [Reel Security] %(message)s')
+    _sec_handler.setFormatter(_sec_formatter)
+    _security_logger.addHandler(_sec_handler)
+    _security_logger.setLevel(logging.INFO)
 
-# Optionally add file handler if log file specified
 if os.environ.get('REEL_LOG_FILE'):
     try:
         _file_handler = logging.FileHandler(os.environ['REEL_LOG_FILE'])
-        _file_handler.setLevel(logging.INFO)
-        _file_handler.setFormatter(_formatter)
+        _file_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s [Reel Security] %(message)s'))
         _security_logger.addHandler(_file_handler)
     except Exception as e:
-        print(f"[Reel] Warning: Could not create log file: {e}")
+        logger.warning(f"Could not create log file: {e}")
 
-# https://setuptools.pypa.io/en/latest/pkg_resources.html
-#     Use of pkg_resources is deprecated in favor of importlib.resources
-# Migration guide: https://importlib-resources.readthedocs.io/en/latest/migration.html
+mimetypes.add_type('application/javascript', '.js')
+
+# Load eel.js
 _eel_js_reference = importlib_resources.files('eel') / 'eel.js'
 with importlib_resources.as_file(_eel_js_reference) as _eel_js_path:
     _eel_js: str = _eel_js_path.read_text(encoding='utf-8')
 
-_websockets: List[Tuple[Any, WebSocketT]] = []
-_call_return_values: Dict[Any, Any] = {}
-_call_return_callbacks: Dict[float, Tuple[Callable[..., Any], Optional[Callable[..., Any]]]] = {}
-_call_number: int = 0
-_exposed_functions: Dict[Any, Any] = {}
-_js_functions: List[Any] = []
-_mock_queue: List[Any] = []
-_mock_queue_done: Set[Any] = set()
-_shutdown: Optional[gvt.Greenlet] = None    # Later assigned as global by _websocket_close()
-root_path: str                              # Later assigned as global by init()
-
-# The maximum time (in milliseconds) that Python will try to retrieve a return value for functions executing in JS
-# Can be overridden through `eel.init` with the kwarg `js_result_timeout` (default: 10000)
-_js_result_timeout: int = 10000
-
-# Security: Maximum WebSocket message size in bytes (1MB default)
-# Prevents memory exhaustion attacks through oversized payloads
-# Can be overridden through environment variable EEL_MAX_MESSAGE_SIZE
-_max_message_size: int = int(os.environ.get('EEL_MAX_MESSAGE_SIZE', 1024 * 1024))  # 1MB
-
-# Security: Rate limiting storage - tracks function calls per client
-# Format: {function_name: {client_id: [timestamp1, timestamp2, ...]}}
-_rate_limit_storage: Dict[str, Dict[str, List[float]]] = {}
-
-# Attribute holding the start args from calls to eel.start()
-_start_args: OptionsDictT = {}
-
-# == Temporary (suppressible) error message to inform users of breaking API change for v1.0.0 ===
-api_error_message: str = '''
-----------------------------------------------------------------------------------
-  'options' argument deprecated in v1.0.0, see https://github.com/ChrisKnott/Eel
-  To suppress this error, add 'suppress_error=True' to start() call.
-  This option will be removed in future versions
-----------------------------------------------------------------------------------
-'''
-# ===============================================================================================
-
-
-# Public functions
-
-
-def expose(name_or_function: Optional[Callable[..., Any]] = None) -> Callable[..., Any]:
-    '''Decorator to expose Python callables via Eel's JavaScript API.
-
-    When an exposed function is called, a callback function can be passed
-    immediately afterwards. This callback will be called asynchronously with
-    the return value (possibly `None`) when the Python function has finished
-    executing.
-
-    Blocking calls to the exposed function from the JavaScript side are only
-    possible using the :code:`await` keyword inside an :code:`async function`.
-    These still have to make a call to the response, i.e.
-    :code:`await eel.py_random()();` inside an :code:`async function` will work,
-    but just :code:`await eel.py_random();` will not.
-
-    :Example:
-
-    In Python do:
-
-    .. code-block:: python
-
-        @expose
-        def say_hello_py(name: str = 'You') -> None:
-            print(f'{name} said hello from the JavaScript world!')
-
-    In JavaScript do:
-
-    .. code-block:: javascript
-
-        eel.say_hello_py('Alice')();
-
-    Expected output on the Python console::
-
-        Alice said hello from the JavaScript world!
-
-    '''
-    # Deal with '@eel.expose()' - treat as '@eel.expose'
-    if name_or_function is None:
-        return expose
-
-    if isinstance(name_or_function, str):   # Called as '@eel.expose("my_name")'
-        name = name_or_function
-
-        def decorator(function: Callable[..., Any]) -> Any:
-            _expose(name, function)
-            return function
-        return decorator
-    else:
-        function = name_or_function
-        _expose(function.__name__, function)
-        return function
-
-
-def rate_limit(max_calls: int = 60, time_window: int = 60) -> Callable[..., Any]:
-    '''
-    Decorator to rate limit exposed functions.
-
-    Prevents DoS attacks by limiting the number of times a function can be called
-    within a time window per client.
-
-    Args:
-        max_calls: Maximum number of calls allowed in the time window (default: 60)
-        time_window: Time window in seconds (default: 60)
-
-    Example:
-        @eel.expose
-        @eel.rate_limit(max_calls=10, time_window=60)
-        def expensive_operation():
-            # This can only be called 10 times per minute per client
-            pass
-
-    Note:
-        Rate limiting is tracked per WebSocket connection (client).
-        For production use, consider implementing distributed rate limiting
-        with Redis or similar for multi-instance deployments.
-    '''
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Get client identifier (use WebSocket object as identifier)
-            # In a real implementation, you'd want a better client identifier
-            client_id = str(id(args)) if args else 'default'
-            func_name = func.__name__
-            current_time = time.time()
-
-            # Initialize storage for this function if needed
-            if func_name not in _rate_limit_storage:
-                _rate_limit_storage[func_name] = {}
-
-            # Initialize storage for this client if needed
-            if client_id not in _rate_limit_storage[func_name]:
-                _rate_limit_storage[func_name][client_id] = []
-
-            # Remove timestamps outside the time window
-            _rate_limit_storage[func_name][client_id] = [
-                ts for ts in _rate_limit_storage[func_name][client_id]
-                if current_time - ts < time_window
-            ]
-
-            # Check if rate limit is exceeded
-            if len(_rate_limit_storage[func_name][client_id]) >= max_calls:
-                _security_logger.warning(
-                    f"Rate limit exceeded for function '{func_name}': "
-                    f"{max_calls} calls per {time_window}s (client: {client_id[:8]}...)"
-                )
-                raise Exception(f"Rate limit exceeded: {max_calls} calls per {time_window} seconds")
-
-            # Record this call
-            _rate_limit_storage[func_name][client_id].append(current_time)
-
-            # Execute the function
-            return func(*args, **kwargs)
-
-        return wrapper
-    return decorator
-
-
-# PyParsing grammar for parsing exposed functions in JavaScript code
-# Examples: `eel.expose(w, "func_name")`, `eel.expose(func_name)`, `eel.expose((function (e){}), "func_name")`
+# PyParsing grammar
 EXPOSED_JS_FUNCTIONS: pp.ZeroOrMore = pp.ZeroOrMore(
     pp.Suppress(
         pp.SkipTo(pp.Literal('eel.expose('))
@@ -231,611 +70,431 @@ EXPOSED_JS_FUNCTIONS: pp.ZeroOrMore = pp.ZeroOrMore(
     )
     + pp.Suppress(pp.Regex(r'["\']?'))
     + pp.Word(pp.printables, excludeChars='"\')')
-    + pp.Suppress(pp.Regex(r'["\']?\s*\)')),
+    + pp.Suppress(pp.Regex(r'["\']?\s*\\)')),
 )
 
+class EelApplication:
+    """
+    Main Eel application class encapsulating state and functionality.
+    """
 
-def init(
-        path: str,
-        allowed_extensions: List[str] = ['.js', '.html', '.txt', '.htm', '.xhtml', '.vue'],
-        js_result_timeout: int = 10000) -> None:
-    '''Initialise Eel.
+    def __init__(self):
+        self._websockets: List[Tuple[Any, WebSocketT]] = []
+        self._call_return_values: Dict[Any, Any] = {}
+        self._call_return_callbacks: Dict[float, Tuple[Callable[..., Any], Optional[Callable[..., Any]]]] = {}
+        self._call_number: int = 0
+        self._exposed_functions: Dict[str, Callable[..., Any]] = {}
+        self._js_functions: List[str] = []
+        self._mock_queue: List[Dict[str, Any]] = []
+        self._mock_queue_done: Set[Any] = set()
+        self._shutdown: Optional[gvt.Greenlet] = None
+        self._root_path: str = ""
+        self._js_result_timeout: int = 10000
+        self._max_message_size: int = int(os.environ.get('EEL_MAX_MESSAGE_SIZE', 1024 * 1024))
+        self._rate_limit_storage: Dict[str, Dict[str, List[float]]] = {}
+        self._start_args: OptionsDictT = {}
+        
+        # Initialize default routes
+        self._bottle_routes = {
+            "/eel.js": (self._eel, dict()),
+            "/": (self._root, dict()),
+            "/<path:path>": (self._static, dict()),
+            "/eel": (self._websocket, dict(apply=[wbs.websocket]))
+        }
 
-    This function should be called before :func:`start()` to initialise the
-    parameters for the web interface, such as the path to the files to be
-    served.
+    def expose(self, name_or_function: Optional[Union[str, Callable[..., Any]]] = None) -> Callable[..., Any]:
+        """Decorator to expose Python callables via Eel's JavaScript API."""
+        if name_or_function is None:
+            return self.expose
 
-    :param path: Sets the path on the filesystem where files to be served to
-        the browser are located, e.g. :file:`web`.
-    :param allowed_extensions: A list of filename extensions which will be
-        parsed for exposed eel functions which should be callable from python.
-        Files with extensions not in *allowed_extensions* will still be served,
-        but any JavaScript functions, even if marked as exposed, will not be
-        accessible from python.
-        *Default:* :code:`['.js', '.html', '.txt', '.htm', '.xhtml', '.vue']`.
-    :param js_result_timeout: How long Eel should be waiting to register the
-        results from a call to Eel's JavaScript API before before timing out.
-        *Default:* :code:`10000` milliseconds.
-    '''
-    global root_path, _js_functions, _js_result_timeout
-    root_path = _get_real_path(path)
-
-    js_functions = set()
-    for root, _, files in os.walk(root_path):
-        for name in files:
-            if not any(name.endswith(ext) for ext in allowed_extensions):
-                continue
-
-            try:
-                with open(os.path.join(root, name), encoding='utf-8') as file:
-                    contents = file.read()
-                    expose_calls = set()
-                    matches = EXPOSED_JS_FUNCTIONS.parseString(contents).asList()
-                    for expose_call in matches:
-                        # Verify that function name is valid
-                        msg = "eel.expose() call contains '(' or '='"
-                        assert rgx.findall(r'[\(=]', expose_call) == [], msg
-                        expose_calls.add(expose_call)
-                    js_functions.update(expose_calls)
-            except UnicodeDecodeError:
-                pass    # Malformed file probably
-
-    _js_functions = list(js_functions)
-    for js_function in _js_functions:
-        _mock_js_function(js_function)
-
-    _js_result_timeout = js_result_timeout
-
-
-def start(
-        *start_urls: str,
-        mode: Optional[Union[str, Literal[False]]] = 'chrome',
-        host: str = 'localhost',
-        port: int = 8000,
-        block: bool = True,
-        jinja_templates: Optional[str] = None,
-        cmdline_args: List[str] = ['--disable-http-cache'],
-        size: Optional[Tuple[int, int]] = None,
-        position: Optional[Tuple[int, int]] = None,
-        geometry: Dict[str, Tuple[int, int]] = {},
-        close_callback: Optional[Callable[..., Any]] = None,
-        app_mode: bool = True,
-        all_interfaces: bool = False,
-        disable_cache: bool = True,
-        default_path: str = 'index.html',
-        app: btl.Bottle = btl.default_app(),
-        shutdown_delay: float = 1.0,
-        suppress_error: bool = False) -> None:
-    '''Start the Eel app.
-
-    Suppose you put all the frontend files in a directory called
-    :file:`web`, including your start page :file:`main.html`, then the app
-    is started like this:
-
-    .. code-block:: python
-
-        import eel
-        eel.init('web')
-        eel.start('main.html')
-
-    This will start a webserver on the default settings
-    (http://localhost:8000) and open a browser to
-    http://localhost:8000/main.html.
-
-    If Chrome or Chromium is installed then by default it will open that in
-    *App Mode* (with the `--app` cmdline flag), regardless of what the OS's
-    default browser is set to (it is possible to override this behaviour).
-
-    :param mode: What browser is used, e.g. :code:`'chrome'`,
-        :code:`'electron'`, :code:`'edge'`, :code:`'custom'`. Can also be
-        `None` or `False` to not open a window. *Default:* :code:`'chrome'`.
-    :param host: Hostname used for Bottle server. *Default:*
-        :code:`'localhost'`.
-    :param port: Port used for Bottle server. Use :code:`0` for port to be
-        picked automatically. *Default:* :code:`8000`.
-    :param block: Whether the call to :func:`start()` blocks the calling
-        thread. *Default:* `True`.
-    :param jinja_templates: Folder for :mod:`jinja2` templates, e.g.
-        :file:`my_templates`. *Default:* `None`.
-    :param cmdline_args: A list of strings to pass to the command starting the
-        browser. For example, we might add extra flags to Chrome with
-        :code:`eel.start('main.html', mode='chrome-app', port=8080,
-        cmdline_args=['--start-fullscreen', '--browser-startup-dialog'])`.
-        *Default:* :code:`[]`.
-    :param size: Tuple specifying the (width, height) of the main window in
-        pixels. *Default:* `None`.
-    :param position: Tuple specifying the (left, top) position of the main
-        window in pixels. *Default*: `None`.
-    :param geometry: A dictionary of specifying the size/position for all
-        windows. The keys should be the relative path of the page, and the
-        values should be a dictionary of the form
-        :code:`{'size': (200, 100), 'position': (300, 50)}`. *Default:*
-        :code:`{}`.
-    :param close_callback: A lambda or function that is called when a websocket
-        or window closes (i.e. when the user closes the window). It should take
-        two arguments: a string which is the relative path of the page that
-        just closed, and a list of the other websockets that are still open.
-        *Default:* `None`.
-    :param app_mode: Whether to run Chrome/Edge in App Mode. You can also
-        specify *mode* as :code:`mode='chrome-app'` as a shorthand to start
-        Chrome in App Mode.
-    :param all_interfaces: Whether to allow the :mod:`bottle` server to listen
-        for connections on all interfaces.
-    :param disable_cache: Sets the no-store response header when serving
-        assets.
-    :param default_path: The default file to retrieve for the root URL.
-    :param app: An instance of :class:`bottle.Bottle` which will be used rather
-        than creating a fresh one. This can be used to install middleware on
-        the instance before starting Eel, e.g. for session management,
-        authentication, etc. If *app* is not a :class:`bottle.Bottle` instance,
-        you will need to call :code:`eel.register_eel_routes(app)` on your
-        custom app instance.
-    :param shutdown_delay: Timer configurable for Eel's shutdown detection
-        mechanism, whereby when any websocket closes, it waits *shutdown_delay*
-        seconds, and then checks if there are now any websocket connections.
-        If not, then Eel closes. In case the user has closed the browser and
-        wants to exit the program. *Default:* :code:`1.0` seconds.
-    :param suppress_error: Temporary (suppressible) error message to inform
-        users of breaking API change for v1.0.0. Set to `True` to suppress
-        the error message.
-    '''
-    _start_args.update({
-        'mode': mode,
-        'host': host,
-        'port': port,
-        'block': block,
-        'jinja_templates': jinja_templates,
-        'cmdline_args': cmdline_args,
-        'size': size,
-        'position': position,
-        'geometry': geometry,
-        'close_callback': close_callback,
-        'app_mode': app_mode,
-        'all_interfaces': all_interfaces,
-        'disable_cache': disable_cache,
-        'default_path': default_path,
-        'app': app,
-        'shutdown_delay': shutdown_delay,
-        'suppress_error': suppress_error,
-    })
-
-    if _start_args['port'] == 0:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(('localhost', 0))
-        _start_args['port'] = sock.getsockname()[1]
-        sock.close()
-
-    if _start_args['jinja_templates'] is not None:
-        from jinja2 import Environment, FileSystemLoader, select_autoescape
-        if not isinstance(_start_args['jinja_templates'], str):
-            raise TypeError("'jinja_templates' start_arg/option must be of type str")
-        templates_path = os.path.join(root_path, _start_args['jinja_templates'])
-        _start_args['jinja_env'] = Environment(
-            loader=FileSystemLoader(templates_path),
-            autoescape=select_autoescape(['html', 'xml'])
-        )
-
-    # verify shutdown_delay is correct value
-    if not isinstance(_start_args['shutdown_delay'], (int, float)):
-        raise ValueError(
-            '`shutdown_delay` must be a number, '
-            'got a {}'.format(type(_start_args['shutdown_delay']))
-        )
-
-    # Launch the browser to the starting URLs
-    show(*start_urls)
-
-    def run_lambda() -> None:
-        if _start_args['all_interfaces'] is True:
-            HOST = '0.0.0.0'
+        if isinstance(name_or_function, str):
+            name = name_or_function
+            def decorator(function: Callable[..., Any]) -> Any:
+                self._expose(name, function)
+                return function
+            return decorator
         else:
-            if not isinstance(_start_args['host'], str):
-                raise TypeError("'host' start_arg/option must be of type str")
-            HOST = _start_args['host']
+            function = name_or_function
+            self._expose(function.__name__, function)
+            return function
 
-        app = _start_args['app']
+    def _expose(self, name: str, function: Callable[..., Any]) -> None:
+        if name in self._exposed_functions:
+            raise ValueError(f'Already exposed function with name "{name}"')
+        self._exposed_functions[name] = function
 
-        if isinstance(app, btl.Bottle):
-            register_eel_routes(app)
+    def rate_limit(self, max_calls: int = 60, time_window: int = 60) -> Callable[..., Any]:
+        """Decorator to rate limit exposed functions."""
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            @wraps(func)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                client_id = str(id(args)) if args else 'default'
+                func_name = func.__name__
+                current_time = time.time()
+
+                if func_name not in self._rate_limit_storage:
+                    self._rate_limit_storage[func_name] = {}
+                
+                if client_id not in self._rate_limit_storage[func_name]:
+                    self._rate_limit_storage[func_name][client_id] = []
+
+                # Clean up old timestamps
+                self._rate_limit_storage[func_name][client_id] = [
+                    ts for ts in self._rate_limit_storage[func_name][client_id]
+                    if current_time - ts < time_window
+                ]
+
+                if len(self._rate_limit_storage[func_name][client_id]) >= max_calls:
+                    _security_logger.warning(
+                        f"Rate limit exceeded for '{func_name}': {max_calls}/{time_window}s (client: {client_id[:8]})"
+                    )
+                    raise Exception(f"Rate limit exceeded: {max_calls} calls per {time_window} seconds")
+
+                self._rate_limit_storage[func_name][client_id].append(current_time)
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
+
+    def init(self, path: str, allowed_extensions: List[str] = ['.js', '.html', '.txt', '.htm', '.xhtml', '.vue'],
+             js_result_timeout: int = 10000) -> None:
+        """Initialize Eel."""
+        self._root_path = self._get_real_path(path)
+        self._js_result_timeout = js_result_timeout
+
+        js_functions = set()
+        for root, _, files in os.walk(self._root_path):
+            for name in files:
+                if not any(name.endswith(ext) for ext in allowed_extensions):
+                    continue
+
+                try:
+                    with open(os.path.join(root, name), encoding='utf-8') as file:
+                        contents = file.read()
+                        matches = EXPOSED_JS_FUNCTIONS.parseString(contents).asList()
+                        for expose_call in matches:
+                            if rgx.findall(r'[\(=]', expose_call):
+                                logger.warning(f"Invalid eel.expose() call: {expose_call}")
+                                continue
+                            js_functions.add(expose_call)
+                except UnicodeDecodeError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error parsing file {name}: {e}")
+
+        self._js_functions = list(js_functions)
+        for js_function in self._js_functions:
+            self._mock_js_function(js_function)
+
+    def start(self, *start_urls: str, mode: str = 'chrome', host: str = 'localhost',
+              port: int = 8000, block: bool = True, jinja_templates: str = None,
+              cmdline_args: List[str] = ['--disable-http-cache'], size: Tuple[int, int] = None,
+              position: Tuple[int, int] = None, geometry: Dict[str, Tuple[int, int]] = {},
+              close_callback: Callable = None, app_mode: bool = True,
+              all_interfaces: bool = False, disable_cache: bool = True,
+              default_path: str = 'index.html', app: btl.Bottle = None,
+              shutdown_delay: float = 1.0, suppress_error: bool = False) -> None:
+        """Start the Eel app."""
+        
+        if app is None:
+            app = btl.default_app()
+
+        self._start_args.update({
+            'mode': mode, 'host': host, 'port': port, 'block': block,
+            'jinja_templates': jinja_templates, 'cmdline_args': cmdline_args,
+            'size': size, 'position': position, 'geometry': geometry,
+            'close_callback': close_callback, 'app_mode': app_mode,
+            'all_interfaces': all_interfaces, 'disable_cache': disable_cache,
+            'default_path': default_path, 'app': app,
+            'shutdown_delay': shutdown_delay, 'suppress_error': suppress_error,
+        })
+
+        if self._start_args['port'] == 0:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(('localhost', 0))
+            self._start_args['port'] = sock.getsockname()[1]
+            sock.close()
+
+        if self._start_args['jinja_templates'] is not None:
+            from jinja2 import Environment, FileSystemLoader, select_autoescape
+            templates_path = os.path.join(self._root_path, self._start_args['jinja_templates'])
+            self._start_args['jinja_env'] = Environment(
+                loader=FileSystemLoader(templates_path),
+                autoescape=select_autoescape(['html', 'xml'])
+            )
+
+        self.show(*start_urls)
+
+        def run_lambda() -> None:
+            HOST = '0.0.0.0' if self._start_args['all_interfaces'] else self._start_args['host']
+            
+            app_instance = self._start_args['app']
+            if isinstance(app_instance, btl.Bottle):
+                self.register_eel_routes(app_instance)
+            else:
+                self.register_eel_routes(btl.default_app())
+
+            btl.run(
+                host=HOST,
+                port=self._start_args['port'],
+                server=wbs.GeventWebSocketServer,
+                quiet=True,
+                app=app_instance
+            )
+
+        if self._start_args['block']:
+            run_lambda()
         else:
-            register_eel_routes(btl.default_app())
+            self.spawn(run_lambda)
 
-        btl.run(
-            host=HOST,
-            port=_start_args['port'],
-            server=wbs.GeventWebSocketServer,
-            quiet=True,
-            app=app)  # Always returns None
+    def show(self, *start_urls: str) -> None:
+        """Show the specified URL(s) in the browser."""
+        brw.open(list(start_urls), self._start_args)
 
-    # Start the webserver
-    if _start_args['block']:
-        run_lambda()
-    else:
-        spawn(run_lambda)
+    def sleep(self, seconds: Union[int, float]) -> None:
+        """Non-blocking sleep."""
+        gvt.sleep(seconds)
 
+    def spawn(self, function: Callable[..., Any], *args: Any, **kwargs: Any) -> gvt.Greenlet:
+        """Spawn a new Greenlet."""
+        return gvt.spawn(function, *args, **kwargs)
 
-def show(*start_urls: str) -> None:
-    '''Show the specified URL(s) in the browser.
+    def register_eel_routes(self, app: btl.Bottle) -> None:
+        """Register Eel routes with a Bottle app."""
+        for route_path, route_params in self._bottle_routes.items():
+            route_func, route_kwargs = route_params
+            app.route(path=route_path, callback=route_func, **route_kwargs)
 
-    Suppose you have two files in your :file:`web` folder. The file
-    :file:`hello.html` regularly includes :file:`eel.js` and provides
-    interactivity, and the file :file:`goodbye.html` does not include
-    :file:`eel.js` and simply provides plain HTML content not reliant on Eel.
+    # Internal methods
 
-    First, we defien a callback function to be called when the browser
-    window is closed:
+    def _eel(self) -> str:
+        start_geometry = {'default': {'size': self._start_args['size'],
+                                      'position': self._start_args['position']},
+                          'pages':   self._start_args['geometry']}
 
-    .. code-block:: python
+        page = _eel_js.replace('/** _py_functions **/',
+                               '_py_functions: %s,' % list(self._exposed_functions.keys()))
+        page = page.replace('/** _start_geometry **/',
+                            '_start_geometry: %s,' % self._safe_json(start_geometry))
+        btl.response.content_type = 'application/javascript'
+        self._set_response_headers(btl.response)
+        return page
 
-        def last_calls():
-           eel.show('goodbye.html')
+    def _root(self) -> btl.Response:
+        return self._static(self._start_args['default_path'])
 
-    Now we initialise and start Eel, with a :code:`close_callback` to our
-    function:
+    def _static(self, path: str) -> btl.Response:
+        try:
+            root = Path(self._root_path).resolve()
+            requested = (Path(self._root_path) / path).resolve()
+            if not str(requested).startswith(str(root)):
+                _security_logger.warning(f"Path traversal attempt blocked: {path}")
+                return btl.HTTPError(403, "Forbidden: Path traversal detected")
+        except (ValueError, OSError) as e:
+            _security_logger.warning(f"Invalid path request: {path} - {e}")
+            return btl.HTTPError(400, "Bad Request: Invalid path")
 
-    ..code-block:: python
+        response = None
+        if 'jinja_env' in self._start_args and 'jinja_templates' in self._start_args:
+            template_prefix = self._start_args['jinja_templates'] + '/'
+            if path.startswith(template_prefix):
+                n = len(template_prefix)
+                template = self._start_args['jinja_env'].get_template(path[n:])
+                response = btl.HTTPResponse(template.render())
 
-        eel.init('web')
-        eel.start('hello.html', mode='chrome-app', close_callback=last_calls)
+        if response is None:
+            response = btl.static_file(path, root=self._root_path)
 
-    When the websocket from :file:`hello.html` is closed (e.g. because the
-    user closed the browser window), Eel will wait *shutdown_delay* seconds
-    (by default 1 second), then call our :code:`last_calls()` function, which
-    opens another window with the :file:`goodbye.html` shown before our Eel app
-    terminates.
+        self._set_response_headers(response)
+        return response
 
-    :param start_urls: One or more URLs to be opened.
-    '''
-    brw.open(list(start_urls), _start_args)
+    def _websocket(self, ws: WebSocketT) -> None:
+        origin = btl.request.environ.get('HTTP_ORIGIN', '')
+        allowed_origins = os.environ.get('EEL_ALLOWED_ORIGINS', 'http://localhost:8000').split(',')
+        localhost_patterns = ['http://localhost:', 'http://127.0.0.1:', 'http://0.0.0.0:']
+        is_localhost = any(origin.startswith(pattern) for pattern in localhost_patterns)
 
+        if origin and not is_localhost and origin not in allowed_origins:
+            _security_logger.warning(f"Rejected WebSocket connection from unauthorized origin: {origin}")
+            ws.close()
+            return
 
-def sleep(seconds: Union[int, float]) -> None:
-    '''A non-blocking sleep call compatible with the Gevent event loop.
+        if origin:
+            _security_logger.info(f"WebSocket connection established from origin: {origin}")
 
-    .. note::
-        While this function simply wraps :func:`gevent.sleep()`, it is better
-        to call :func:`eel.sleep()` in your eel app, as this will ensure future
-        compatibility in case the implementation of Eel should change in some
-        respect.
+        for js_function in self._js_functions:
+            self._import_js_function(js_function)
 
-    :param seconds: The number of seconds to sleep.
-    '''
-    gvt.sleep(seconds)
+        page = btl.request.query.page
+        if page not in self._mock_queue_done:
+            for call in self._mock_queue:
+                self._repeated_send(ws, self._safe_json(call))
+            self._mock_queue_done.add(page)
 
+        self._websockets += [(page, ws)]
 
-def spawn(function: Callable[..., Any], *args: Any, **kwargs: Any) -> gvt.Greenlet:
-    '''Spawn a new Greenlet.
+        while True:
+            msg = ws.receive()
+            if msg is not None:
+                msg_size = len(msg.encode('utf-8')) if isinstance(msg, str) else len(msg)
+                if msg_size > self._max_message_size:
+                    _security_logger.warning(f"Rejected oversized WebSocket message: {msg_size} bytes")
+                    ws.close()
+                    self._websockets.remove((page, ws))
+                    break
 
-    Calling this function will spawn a new :class:`gevent.Greenlet` running
-    *function* asynchronously.
-
-    .. caution::
-        If you spawn your own Greenlets to run in addition to those spawned by
-        Eel's internal core functionality, you will have to ensure that those
-        Greenlets will terminate as appropriate (either by returning or by
-        being killed via Gevent's kill mechanism), otherwise your app may not
-        terminate correctly when Eel itself terminates.
-
-    :param function: The function to be called and run as the Greenlet.
-    :param *args: Any positional arguments that should be passed to *function*.
-    :param **kwargs: Any key-word arguments that should be passed to
-        *function*.
-    '''
-    return gvt.spawn(function, *args, **kwargs)
-
-
-# Bottle Routes
-
-
-def _eel() -> str:
-    start_geometry = {'default': {'size': _start_args['size'],
-                                  'position': _start_args['position']},
-                      'pages':   _start_args['geometry']}
-
-    page = _eel_js.replace('/** _py_functions **/',
-                           '_py_functions: %s,' % list(_exposed_functions.keys()))
-    page = page.replace('/** _start_geometry **/',
-                        '_start_geometry: %s,' % _safe_json(start_geometry))
-    btl.response.content_type = 'application/javascript'
-    _set_response_headers(btl.response)
-    return page
-
-
-def _root() -> btl.Response:
-    if not isinstance(_start_args['default_path'], str):
-        raise TypeError("'default_path' start_arg/option must be of type str")
-    return _static(_start_args['default_path'])
-
-
-def _static(path: str) -> btl.Response:
-    # Security: Validate path to prevent directory traversal attacks
-    try:
-        # Resolve the requested path and root path to absolute paths
-        root = Path(root_path).resolve()
-        requested = (Path(root_path) / path).resolve()
-
-        # Ensure the resolved path is within the root directory
-        if not str(requested).startswith(str(root)):
-            _security_logger.warning(f"Path traversal attempt blocked: {path}")
-            return btl.HTTPError(403, "Forbidden: Path traversal detected")
-    except (ValueError, OSError) as e:
-        _security_logger.warning(f"Invalid path request: {path} - {e}")
-        return btl.HTTPError(400, "Bad Request: Invalid path")
-
-    response = None
-    if 'jinja_env' in _start_args and 'jinja_templates' in _start_args:
-        if not isinstance(_start_args['jinja_templates'], str):
-            raise TypeError("'jinja_templates' start_arg/option must be of type str")
-        template_prefix = _start_args['jinja_templates'] + '/'
-        if path.startswith(template_prefix):
-            n = len(template_prefix)
-            template = _start_args['jinja_env'].get_template(path[n:])
-            response = btl.HTTPResponse(template.render())
-
-    if response is None:
-        response = btl.static_file(path, root=root_path)
-
-    _set_response_headers(response)
-    return response
-
-
-def _websocket(ws: WebSocketT) -> None:
-    global _websockets
-
-    # Security: Validate WebSocket origin to prevent CSRF attacks
-    origin = btl.request.environ.get('HTTP_ORIGIN', '')
-    allowed_origins = os.environ.get('EEL_ALLOWED_ORIGINS', 'http://localhost:8000').split(',')
-
-    # Allow localhost variations for development
-    localhost_patterns = ['http://localhost:', 'http://127.0.0.1:', 'http://0.0.0.0:']
-    is_localhost = any(origin.startswith(pattern) for pattern in localhost_patterns)
-
-    if origin and not is_localhost and origin not in allowed_origins:
-        # Reject connections from unauthorized origins
-        _security_logger.warning(f"Rejected WebSocket connection from unauthorized origin: {origin}")
-        ws.close()
-        return
-
-    # Log successful WebSocket connection
-    if origin:
-        _security_logger.info(f"WebSocket connection established from origin: {origin}")
-
-    for js_function in _js_functions:
-        _import_js_function(js_function)
-
-    page = btl.request.query.page
-    if page not in _mock_queue_done:
-        for call in _mock_queue:
-            _repeated_send(ws, _safe_json(call))
-        _mock_queue_done.add(page)
-
-    _websockets += [(page, ws)]
-
-    while True:
-        msg = ws.receive()
-        if msg is not None:
-            # Security: Check message size to prevent memory exhaustion attacks
-            msg_size = len(msg.encode('utf-8')) if isinstance(msg, str) else len(msg)
-            if msg_size > _max_message_size:
-                _security_logger.warning(
-                    f"Rejected oversized WebSocket message: {msg_size} bytes "
-                    f"(max: {_max_message_size}) from page: {page}"
-                )
-                # Close the connection for security
-                ws.close()
-                _websockets.remove((page, ws))
+                try:
+                    message = jsn.loads(msg)
+                    self.spawn(self._process_message, message, ws)
+                except jsn.JSONDecodeError:
+                    logger.warning("Invalid JSON received")
+            else:
+                self._websockets.remove((page, ws))
                 break
 
-            message = jsn.loads(msg)
-            spawn(_process_message, message, ws)
-        else:
-            _websockets.remove((page, ws))
-            break
+        self._websocket_close(page)
 
-    _websocket_close(page)
+    def _safe_json(self, obj: Any) -> str:
+        return jsn.dumps(obj, default=lambda o: None)
 
+    def _repeated_send(self, ws: WebSocketT, msg: str) -> None:
+        for _ in range(100):
+            try:
+                ws.send(msg)
+                break
+            except Exception:
+                self.sleep(0.001)
 
-BOTTLE_ROUTES: Dict[str, Tuple[Callable[..., Any], Dict[Any, Any]]] = {
-    "/eel.js": (_eel, dict()),
-    "/": (_root, dict()),
-    "/<path:path>": (_static, dict()),
-    "/eel": (_websocket, dict(apply=[wbs.websocket]))
-}
+    def _process_message(self, message: Dict[str, Any], ws: WebSocketT) -> None:
+        if 'call' in message:
+            error_info = {}
+            try:
+                if message['name'] in self._exposed_functions:
+                    return_val = self._exposed_functions[message['name']](*message['args'])
+                    status = 'ok'
+                else:
+                    return_val = None
+                    status = 'error'
+                    error_info['errorText'] = f"Function {message['name']} not found"
+            except Exception as e:
+                err_traceback = traceback.format_exc()
+                logger.error(f"Error calling {message['name']}: {e}", exc_info=True)
+                return_val = None
+                status = 'error'
+                if os.environ.get('EEL_DEBUG'):
+                    error_info['errorText'] = repr(e)
+                    error_info['errorTraceback'] = err_traceback
+                else:
+                    error_info['errorText'] = 'An error occurred while processing your request'
+                    _security_logger.error(f"Function error: {message.get('name')} - {e}")
 
-
-def register_eel_routes(app: btl.Bottle) -> None:
-    '''Register the required eel routes with `app`.
-
-    .. note::
-
-        :func:`eel.register_eel_routes()` is normally invoked implicitly by
-        :func:`eel.start()` and does not need to be called explicitly in most
-        cases. Registering the eel routes explicitly is only needed if you are
-        passing something other than an instance of :class:`bottle.Bottle` to
-        :func:`eel.start()`.
-
-    :Example:
-
-        >>> app = bottle.Bottle()
-        >>> eel.register_eel_routes(app)
-        >>> middleware = beaker.middleware.SessionMiddleware(app)
-        >>> eel.start(app=middleware)
-
-    '''
-    for route_path, route_params in BOTTLE_ROUTES.items():
-        route_func, route_kwargs = route_params
-        app.route(path=route_path, callback=route_func, **route_kwargs)
-
-
-# Private functions
-
-
-def _safe_json(obj: Any) -> str:
-    return jsn.dumps(obj, default=lambda o: None)
-
-
-def _repeated_send(ws: WebSocketT, msg: str) -> None:
-    for attempt in range(100):
-        try:
-            ws.send(msg)
-            break
-        except Exception:
-            sleep(0.001)
-
-
-def _process_message(message: Dict[str, Any], ws: WebSocketT) -> None:
-    if 'call' in message:
-        error_info = {}
-        try:
-            return_val = _exposed_functions[message['name']](*message['args'])
-            status = 'ok'
-        except Exception as e:
-            err_traceback = traceback.format_exc()
-            traceback.print_exc()
-            return_val = None
-            status = 'error'
-
-            # Security: Only expose detailed errors in development mode
-            # Set EEL_DEBUG=1 environment variable to enable debug mode
-            if os.environ.get('EEL_DEBUG'):
-                error_info['errorText'] = repr(e)
-                error_info['errorTraceback'] = err_traceback
+            self._repeated_send(ws, self._safe_json({
+                'return': message['call'],
+                'status': status,
+                'value': return_val,
+                'error': error_info,
+            }))
+        elif 'return' in message:
+            call_id = message['return']
+            if call_id in self._call_return_callbacks:
+                callback, error_callback = self._call_return_callbacks.pop(call_id)
+                if message['status'] == 'ok':
+                    callback(message['value'])
+                elif message['status'] == 'error' and error_callback is not None:
+                    error_callback(message['error'], message.get('stack'))
+            elif call_id in self._call_return_values:
+                # Value was already set, or we're just storing it
+                pass
             else:
-                # Production mode: sanitized error message
-                error_info['errorText'] = 'An error occurred while processing your request'
-                # Log full error server-side for debugging
-                _security_logger.error(
-                    f"Function execution error: {message.get('name')} - {repr(e)}",
-                    exc_info=True if os.environ.get('EEL_DEBUG') else False
-                )
-
-        _repeated_send(ws, _safe_json({ 'return': message['call'],
-                                        'status': status,
-                                        'value': return_val,
-                                        'error': error_info,}))
-    elif 'return' in message:
-        call_id = message['return']
-        if call_id in _call_return_callbacks:
-            callback, error_callback = _call_return_callbacks.pop(call_id)
-            if message['status'] == 'ok':
-                callback(message['value'])
-            elif message['status'] == 'error' and error_callback is not None:
-                error_callback(message['error'], message['stack'])
+                self._call_return_values[call_id] = message['value']
         else:
-            _call_return_values[call_id] = message['value']
+            logger.warning(f'Invalid message received: {message}')
 
-    else:
-        print('Invalid message received: ', message)
-
-
-def _get_real_path(path: str) -> str:
-    if getattr(sys, 'frozen', False):
-        return os.path.join(sys._MEIPASS, path)  # type: ignore # sys._MEIPASS is dynamically added by PyInstaller
-    else:
-        return os.path.abspath(path)
-
-
-def _mock_js_function(f: str) -> None:
-    # Security: Replaced exec() with safe callable wrapper
-    # This prevents code injection vulnerabilities
-    def make_mock_wrapper(function_name: str) -> Callable:
-        return lambda *args: _mock_call(function_name, args)
-    globals()[f] = make_mock_wrapper(f)
-
-
-def _import_js_function(f: str) -> None:
-    # Security: Replaced exec() with safe callable wrapper
-    # This prevents code injection vulnerabilities
-    def make_js_wrapper(function_name: str) -> Callable:
-        return lambda *args: _js_call(function_name, args)
-    globals()[f] = make_js_wrapper(f)
-
-
-def _call_object(name: str, args: Any) -> Dict[str, Any]:
-    global _call_number
-    _call_number += 1
-    call_id = _call_number + rnd.random()
-    return {'call': call_id, 'name': name, 'args': args}
-
-
-def _mock_call(name: str, args: Any) -> Callable[[Optional[Callable[..., Any]], Optional[Callable[..., Any]]], Any]:
-    call_object = _call_object(name, args)
-    global _mock_queue
-    _mock_queue += [call_object]
-    return _call_return(call_object)
-
-
-def _js_call(name: str, args: Any) -> Callable[[Optional[Callable[..., Any]], Optional[Callable[..., Any]]], Any]:
-    call_object = _call_object(name, args)
-    for _, ws in _websockets:
-        _repeated_send(ws, _safe_json(call_object))
-    return _call_return(call_object)
-
-
-def _call_return(call: Dict[str, Any]) -> Callable[[Optional[Callable[..., Any]], Optional[Callable[..., Any]]], Any]:
-    global _js_result_timeout
-    call_id = call['call']
-
-    def return_func(callback: Optional[Callable[..., Any]] = None,
-                    error_callback: Optional[Callable[..., Any]] = None) -> Any:
-        if callback is not None:
-            _call_return_callbacks[call_id] = (callback, error_callback)
+    def _get_real_path(self, path: str) -> str:
+        if getattr(sys, 'frozen', False):
+            return os.path.join(sys._MEIPASS, path) # type: ignore
         else:
-            for w in range(_js_result_timeout):
-                if call_id in _call_return_values:
-                    return _call_return_values.pop(call_id)
-                sleep(0.001)
-    return return_func
+            return os.path.abspath(path)
 
+    def _mock_js_function(self, f: str) -> None:
+        def make_mock_wrapper(function_name: str) -> Callable:
+            return lambda *args: self._mock_call(function_name, args)
+        
+        # Inject into instance
+        setattr(self, f, make_mock_wrapper(f))
 
-def _expose(name: str, function: Callable[..., Any]) -> None:
-    msg = 'Already exposed function with name "%s"' % name
-    assert name not in _exposed_functions, msg
-    _exposed_functions[name] = function
+    def _import_js_function(self, f: str) -> None:
+        def make_js_wrapper(function_name: str) -> Callable:
+            return lambda *args: self._js_call(function_name, args)
+        
+        # Inject into instance
+        setattr(self, f, make_js_wrapper(f))
 
+    def _call_object(self, name: str, args: Any) -> Dict[str, Any]:
+        self._call_number += 1
+        call_id = self._call_number + rnd.random()
+        return {'call': call_id, 'name': name, 'args': args}
 
-def _detect_shutdown() -> None:
-    if len(_websockets) == 0:
-        sys.exit()
+    def _mock_call(self, name: str, args: Any) -> Callable:
+        call_object = self._call_object(name, args)
+        self._mock_queue += [call_object]
+        return self._call_return(call_object)
 
+    def _js_call(self, name: str, args: Any) -> Callable:
+        call_object = self._call_object(name, args)
+        for _, ws in self._websockets:
+            self._repeated_send(ws, self._safe_json(call_object))
+        return self._call_return(call_object)
 
-def _websocket_close(page: str) -> None:
-    global _shutdown
+    def _call_return(self, call: Dict[str, Any]) -> Callable:
+        call_id = call['call']
+        def return_func(callback: Callable = None, error_callback: Callable = None) -> Any:
+            if callback is not None:
+                self._call_return_callbacks[call_id] = (callback, error_callback)
+            else:
+                for _ in range(self._js_result_timeout):
+                    if call_id in self._call_return_values:
+                        return self._call_return_values.pop(call_id)
+                    self.sleep(0.001)
+        return return_func
 
-    close_callback = _start_args.get('close_callback')
+    def _detect_shutdown(self) -> None:
+        if len(self._websockets) == 0:
+            sys.exit()
 
-    if close_callback is not None:
-        if not callable(close_callback):
-            raise TypeError("'close_callback' start_arg/option must be callable or None")
-        sockets = [p for _, p in _websockets]
-        close_callback(page, sockets)
-    else:
-        if isinstance(_shutdown, gvt.Greenlet):
-            _shutdown.kill()
+    def _websocket_close(self, page: str) -> None:
+        close_callback = self._start_args.get('close_callback')
+        if close_callback is not None:
+            if not callable(close_callback):
+                raise TypeError("'close_callback' must be callable or None")
+            sockets = [p for _, p in self._websockets]
+            close_callback(page, sockets)
+        else:
+            if isinstance(self._shutdown, gvt.Greenlet):
+                self._shutdown.kill()
+            self._shutdown = gvt.spawn_later(self._start_args['shutdown_delay'], self._detect_shutdown)
 
-        _shutdown = gvt.spawn_later(_start_args['shutdown_delay'], _detect_shutdown)
+    def _set_response_headers(self, response: btl.Response) -> None:
+        response.set_header('X-Content-Type-Options', 'nosniff')
+        response.set_header('X-Frame-Options', 'DENY')
+        response.set_header('X-XSS-Protection', '1; mode=block')
+        default_csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'"
+        response.set_header('Content-Security-Policy', default_csp)
+        if self._start_args['disable_cache']:
+            response.set_header('Cache-Control', 'no-store')
 
+# Default Instance
+_default_app = EelApplication()
 
-def _set_response_headers(response: btl.Response) -> None:
-    # Security: Add security headers to protect against common web vulnerabilities
-    # X-Content-Type-Options: Prevent MIME-type sniffing
-    response.set_header('X-Content-Type-Options', 'nosniff')
+# Module-level Proxies
+def init(*args, **kwargs): return _default_app.init(*args, **kwargs)
+def start(*args, **kwargs): return _default_app.start(*args, **kwargs)
+def expose(name_or_function=None): return _default_app.expose(name_or_function)
+def rate_limit(*args, **kwargs): return _default_app.rate_limit(*args, **kwargs)
+def sleep(seconds): return _default_app.sleep(seconds)
+def spawn(function, *args, **kwargs): return _default_app.spawn(function, *args, **kwargs)
+def show(*args, **kwargs): return _default_app.show(*args, **kwargs)
+def register_eel_routes(app): return _default_app.register_eel_routes(app)
 
-    # X-Frame-Options: Prevent clickjacking attacks
-    response.set_header('X-Frame-Options', 'DENY')
-
-    # X-XSS-Protection: Enable browser XSS protection
-    response.set_header('X-XSS-Protection', '1; mode=block')
-
-    # Content-Security-Policy: Restrict resource loading
-    # Note: Users can override this with custom CSP in their applications
-    default_csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'"
-    response.set_header('Content-Security-Policy', default_csp)
-
-    # Strict-Transport-Security: Enforce HTTPS (only if using HTTPS)
-    # Users should enable this in production with HTTPS
-    # response.set_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-
-    if _start_args['disable_cache']:
-        # https://stackoverflow.com/a/24748094/280852
-        response.set_header('Cache-Control', 'no-store')
+# Support for eel.my_js_function() on the default app
+def __getattr__(name: str) -> Any:
+    return getattr(_default_app, name)

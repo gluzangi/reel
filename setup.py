@@ -15,18 +15,24 @@ setup(
         'eel': ['eel.js', 'py.typed'],
     },
     install_requires=[
-        'bottle>=0.12.0,<1.0.0',
-        'bottle-websocket>=0.2.0,<1.0.0',
-        'future>=0.18.0',
-        'pyparsing>=3.0.0,<4.0.0',
+        'bottle>=0.12.19,<1.0',
+        'bottle-websocket>=0.2.9,<1.0',
+        'pyparsing>=3.0.0,<4.0',
         'typing_extensions>=4.3.0',
-        'importlib_resources>=1.3',
-        'gevent>=21.0.0',
+        'gevent>=21.0.0,<25.0',
         'gevent-websocket>=0.10.0,<1.0.0',
-        'greenlet>=1.0.0,<3.0.0',
+        'greenlet>=1.0.0,<4.0.0',
+        'importlib_resources>=5.0;python_version<"3.9"',
     ],
     extras_require={
-        "jinja2": ['jinja2>=2.10']
+        "jinja2": ['jinja2>=2.10'],
+        "security": [
+            "cryptography>=3.4.0",
+        ],
+        "ai": [
+            "llama-cpp-python>=0.2.0",
+            "sentence-transformers>=2.2.0",
+        ]
     },
     python_requires='>=3.7',
     description='For little HTML GUI applications, with easy Python/JS interop',
@@ -42,6 +48,9 @@ setup(
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: Implementation :: CPython',
         'License :: OSI Approved :: MIT License',
     ],

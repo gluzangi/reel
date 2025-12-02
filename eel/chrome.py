@@ -1,4 +1,3 @@
-from __future__ import annotations
 import sys
 import os
 import subprocess as sps
@@ -16,7 +15,7 @@ def run(path: str, options: OptionsDictT, start_urls: List[str]) -> None:
     if options['app_mode']:
         for url in start_urls:
             sps.Popen([path, '--app=%s' % url] +
-                       options['cmdline_args'],
+                       options['cmdline_args']),
                        stdout=sps.PIPE, stderr=sps.PIPE, stdin=sps.PIPE)
     else:
         args: List[str] = options['cmdline_args'] + start_urls
@@ -25,6 +24,14 @@ def run(path: str, options: OptionsDictT, start_urls: List[str]) -> None:
 
 
 def find_path() -> Optional[str]:
+    # Priority 1: Check PATH using which
+    common_names = ['google-chrome', 'chromium', 'chromium-browser', 'chrome', 'google-chrome-stable']
+    for name in common_names:
+        path = which(name)
+        if path:
+            return path
+
+    # Priority 2: Platform-specific logic
     if sys.platform in ['win32', 'win64']:
         return _find_chrome_win()
     elif sys.platform == 'darwin':
@@ -36,14 +43,24 @@ def find_path() -> Optional[str]:
 
 
 def _find_chrome_mac() -> Optional[str]:
-    default_dir = r'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-    if os.path.exists(default_dir):
-        return default_dir
+    default_dirs = [
+        r'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        r'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    ]
+    for path in default_dirs:
+        if os.path.exists(path):
+            return path
+            
     # use mdfind ci to locate Chrome in alternate locations and return the first one
     name = 'Google Chrome.app'
-    alternate_dirs = [x for x in sps.check_output(["mdfind", name]).decode().split('\n') if x.endswith(name)]
-    if len(alternate_dirs):
-        return alternate_dirs[0] + '/Contents/MacOS/Google Chrome'
+    try:
+        out = sps.check_output(["mdfind", name]).decode().split('\n')
+        alternate_dirs = [x for x in out if x.endswith(name)]
+        if len(alternate_dirs):
+            return alternate_dirs[0] + '/Contents/MacOS/Google Chrome'
+    except (sps.CalledProcessError, FileNotFoundError):
+        pass
+        
     return None
 
 
@@ -53,22 +70,33 @@ def _find_chromium_mac() -> Optional[str]:
         return default_dir
     # use mdfind ci to locate Chromium in alternate locations and return the first one
     name = 'Chromium.app'
-    alternate_dirs = [x for x in sps.check_output(["mdfind", name]).decode().split('\n') if x.endswith(name)]
-    if len(alternate_dirs):
-        return alternate_dirs[0] + '/Contents/MacOS/Chromium'
+    try:
+        out = sps.check_output(["mdfind", name]).decode().split('\n')
+        alternate_dirs = [x for x in out if x.endswith(name)]
+        if len(alternate_dirs):
+            return alternate_dirs[0] + '/Contents/MacOS/Chromium'
+    except (sps.CalledProcessError, FileNotFoundError):
+        pass
+        
     return None
 
 
 def _find_chrome_linux() -> Optional[str]:
-    chrome_names = ['chromium-browser',
-                    'chromium',
-                    'google-chrome',
-                    'google-chrome-stable']
+    # Fallback to standard locations if not found in PATH
+    standard_paths = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/local/bin/google-chrome',
+        '/snap/bin/chromium',
+        '/var/lib/flatpak/exports/bin/com.google.Chrome',
+        '/opt/google/chrome/google-chrome',
+    ]
 
-    for name in chrome_names:
-        chrome = which(name)
-        if chrome is not None:
-            return chrome
+    for path in standard_paths:
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            return path
+            
     return None
 
 
